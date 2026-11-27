@@ -94,8 +94,20 @@ class Plan(BaseModel):
     run_id: str
     steps: list[PlanStep]
     blast_radius: str
-    status: Literal["draft", "pending_approval", "dry_run", "executed", "denied", "cancelled", "blocked"]
+    status: Literal[
+        "draft",
+        "pending_approval",
+        "dry_run",
+        "executing",
+        "executed",
+        "denied",
+        "cancelled",
+        "blocked",
+    ] = "draft"
     approved: bool = False
+    approval_used: bool = False
+    created_at: str = ""
+    expires_at: str = ""
 
 
 class RunResult(BaseModel):

@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from hijackrewind.config import Settings
+from hijackrewind.config import Settings, reveal
 
 _REQUIRED_SCOPES = ("admin:public_key", "user")
 
@@ -31,13 +31,13 @@ async def live_preflight(settings: Settings) -> PreflightReport:
                 f"mode: {settings.mode}",
                 "live preflight skipped",
                 f"dkim: {settings.dkim_mode()}",
-                "github token: " + ("set" if settings.github_token else "unset"),
+                "github token: " + ("set" if reveal(settings.github_token) else "unset"),
             ),
         )
     host = (urlparse(settings.github_api_url).hostname or "").lower()
     if host != "api.github.com":
         return PreflightReport(False, ("live mode only calls api.github.com",))
-    if not settings.github_token:
+    if not reveal(settings.github_token):
         return PreflightReport(False, ("GITHUB_TOKEN is unset",))
     if not settings.test_github_login:
         return PreflightReport(False, ("TEST_GITHUB_LOGIN is unset",))
@@ -45,7 +45,7 @@ async def live_preflight(settings: Settings) -> PreflightReport:
         return PreflightReport(False, ("TEST_REPO_OWNER and TEST_REPO_NAME are required",))
     headers = {
         "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {settings.github_token}",
+        "Authorization": f"Bearer {reveal(settings.github_token)}",
         "User-Agent": "HijackRewind",
     }
     base = settings.github_api_url.rstrip("/")

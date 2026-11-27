@@ -27,6 +27,7 @@ def settings(stub: StubServer, tmp_path) -> Settings:
         audit_log=str(tmp_path / "audit.jsonl"),
         home=str(tmp_path / "home"),
         auto_execute_ssh_key=True,
+        auto_execute_containment=True,
         mutate_cap=1,
         sender_allowlist="github.com",
         test_repo_owner="test-owner",

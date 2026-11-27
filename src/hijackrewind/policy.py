@@ -1,16 +1,9 @@
-"""Code-level authorization. Prompts, files, and the optional LLM cannot call this.
+"""Code-level authorization. The plan's own disposition label is not consulted.
 
-Policy table:
-
-| Action | Disposition | Why |
-| --- | --- | --- |
-| Delete an unknown SSH key | auto | Reversible by posting the saved public key |
-| Delete an unknown deploy key on the test repo | auto | Reversible by posting the saved public key |
-| Delete a webhook whose host is not allowlisted | auto | Reversible by posting the saved config, except the secret GitHub does not return |
-| Restore branch protection from the known-good document | auto | The body comes from the manifest, not from the alert |
-| Delete an account email, GPG key, signing key, or collaborator | approval | Ambiguous or harder to undo |
-| Delete a repository, change an org, or remove branch protection that is not a restore | approval or refused | Destructive |
-| Revoke an OAuth grant, another PAT, or a web session | unavailable | No endpoint a user token can call |
+Auto-execute requires all of:
+- the caller passed allow_auto=True
+- the action kind is one this config turns on
+- the live object was matched to the claim and is not on the known-good manifest
 """
 
 from __future__ import annotations
@@ -56,6 +49,46 @@ def object_is_known(step: PlanStep, manifest: Manifest) -> bool:
     return False
 
 
+def classify(step: PlanStep, settings: Settings, manifest: Manifest) -> str:
+    """unknown, suspicious, confirmed, known, or unavailable. Display and policy share this."""
+    if step.kind in UNAVAILABLE_REASONS or step.method == "NONE":
+        return "unavailable"
+    if object_is_known(step, manifest):
+        return "known"
+    if step.kind == "branch_protection" and step.method == "PUT":
+        saved = manifest.repo(step.owner, step.repo).protections.get(step.object_id)
+        if saved and step.body == saved:
+            return "confirmed"
+        return "suspicious"
+    if not step.before:
+        return "unknown"
+    live_id = str(step.before.get("id", step.before.get("email", "")))
+    if str(step.object_id) not in {live_id, str(step.before.get("email", "")).lower()}:
+        return "suspicious"
+    if step.kind == "webhook":
+        return "confirmed" if _host_unknown(step, settings) else "suspicious"
+    return "confirmed"
+
+
+def _host_unknown(step: PlanStep, settings: Settings) -> bool:
+    from urllib.parse import urlparse
+
+    host = (urlparse(((step.before or {}).get("config") or {}).get("url", "")).hostname or "").lower()
+    return bool(host) and host not in settings.webhook_hosts()
+
+
+def _config_allows_auto(step: PlanStep, settings: Settings) -> bool:
+    if step.kind == "ssh_key" and step.method == "DELETE":
+        return settings.auto_execute_ssh_key
+    if step.kind == "deploy_key" and step.method == "DELETE":
+        return settings.auto_execute_containment
+    if step.kind == "webhook" and step.method == "DELETE":
+        return settings.auto_execute_containment and _host_unknown(step, settings)
+    if step.kind == "branch_protection" and step.method == "PUT":
+        return settings.auto_execute_containment
+    return False
+
+
 def authorize(
     step: PlanStep,
     settings: Settings,
@@ -65,25 +98,46 @@ def authorize(
     allow_auto: bool,
     approved: bool,
 ) -> tuple[bool, str]:
-    del allow_auto
-    if step.disposition == "unavailable" or step.method == "NONE":
+    kind = classify(step, settings, manifest)
+    if kind == "unavailable":
         return False, step.reason or UNAVAILABLE_REASONS.get(step.kind, "no supported endpoint")
     if settings.mode == "dry-run":
         return False, "mode is dry-run"
+    if step.method not in {"DELETE", "PUT", "POST"}:
+        return False, "method is not a containment mutate"
     if not repo_is_configured(step.path, settings.test_repo_owner, settings.test_repo_name):
         return False, "repo is outside the configured test repository"
-    if object_is_known(step, manifest):
+    if kind == "known" or object_is_known(step, manifest):
         return False, "object is on the known-good manifest"
     if step.primary:
         return False, "refusing to delete the primary email"
     if step.kind == "repo_delete":
         return False, UNAVAILABLE_REASONS["repo_delete"]
+    if kind != "confirmed":
+        return False, f"classification is {kind}; explicit approval is not enough without a confirmed match"
     if not meter.can_mutate():
         return False, "per-run mutate cap reached"
-    if step.disposition == "auto":
-        if step.kind == "ssh_key" and not settings.auto_execute_ssh_key:
-            return False, "explicit approval required"
-        return True, f"policy auto-execute for reversible {step.kind}"
+    if allow_auto and _config_allows_auto(step, settings):
+        return True, f"policy auto-execute for confirmed {step.kind}"
     if approved:
         return True, "operator approval recorded in the audit log"
     return False, "explicit approval required"
+
+
+def authorize_rewind(record: dict, settings: Settings) -> tuple[bool, str]:
+    """Operator restore. Dry-run is refused here and again in the HTTP client."""
+    if settings.mode == "dry-run":
+        return False, "mode is dry-run"
+    if record.get("status") == "rolled_back":
+        return True, "already rolled back"
+    if record.get("status") == "outcome_unknown":
+        return False, "outcome unknown; run reconcile before rewind"
+    if record.get("status") not in {"pending", "executed"}:
+        return False, "action is not in a rewindable state"
+    method = record.get("reverse_method")
+    path = record.get("reverse_path") or ""
+    if method not in {"POST", "PUT"} or not path:
+        return False, "this action has no reversible API call"
+    if not repo_is_configured(path, settings.test_repo_owner, settings.test_repo_name):
+        return False, "rewind path is outside the configured test repository"
+    return True, "policy allows rewind of the saved before-state"

@@ -30,7 +30,9 @@ def test_request_timeout_stops_the_call(services):
     services.settings.delete_delay = 2
 
     async def attempt():
-        with pytest.raises(httpx.TimeoutException):
+        from hijackrewind.github_client import OutcomeUnknown
+
+        with pytest.raises(OutcomeUnknown):
             await services.github.delete("/user/keys/99")
 
     asyncio.run(attempt())

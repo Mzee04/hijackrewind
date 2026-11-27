@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
+import os
 import socket
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -52,7 +55,13 @@ def build_services(
     monitor: Monitor | None = None,
     audit: AuditLog | None = None,
 ) -> Services:
-    audit_log = audit or AuditLog(settings.audit_log, settings.secret_values())
+    from hijackrewind.config import reveal
+
+    audit_log = audit or AuditLog(
+        settings.audit_log,
+        settings.secret_values(),
+        hmac_key=reveal(settings.audit_hmac_key),
+    )
     switch = kill or KillSwitch(settings.kill_file())
     screen = monitor or Monitor()
     meter = CostMeter(settings.mutate_cap)
@@ -132,6 +141,24 @@ def stub_state(base_url: str) -> dict:
     response = httpx.get(base_url.rstrip("/") + "/_admin/state", timeout=5)
     response.raise_for_status()
     return response.json()
+
+
+_PROCESS_LOCK = threading.RLock()
+
+
+@contextmanager
+def execution_lock(settings):
+    """One execution at a time in this process and across processes sharing HIJACKREWIND_HOME."""
+    path = Path(settings.home) / "execute.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _PROCESS_LOCK:
+        fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o644)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
 
 
 def repo_root() -> Path:

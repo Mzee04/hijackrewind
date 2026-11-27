@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf" content="<!--CSRF-->">
 <title>HijackRewind</title>
 <style>
   :root { color-scheme: light; }
@@ -39,7 +40,10 @@
     <h1>HijackRewind</h1>
     <p id="mode">loading</p>
   </div>
-  <button id="kill" class="kill" type="button">Kill switch</button>
+  <div class="row">
+    <input id="token" type="password" placeholder="operator token" aria-label="Operator token" autocomplete="off">
+    <button id="kill" class="kill" type="button">Kill switch</button>
+  </div>
 </header>
 <main>
   <div>
@@ -47,6 +51,7 @@
       <h2>Incident</h2>
       <p><span class="pill" id="step">idle</span> <span id="run"></span></p>
       <p id="summary">No run yet.</p>
+      <p id="task-error"></p>
       <p id="cost">Rate-limit points this run: 0</p>
     </section>
     <section>
@@ -82,11 +87,6 @@
 const $ = (id) => document.querySelector(id);
 let planId = "";
 
-function tag(status) {
-  const name = status || "noted";
-  return '<span class="tag ' + name + '">' + name.replaceAll("_", " ") + "</span>";
-}
-
 function list(node, items, render) {
   node.replaceChildren();
   if (!items.length) {
@@ -97,7 +97,12 @@ function list(node, items, render) {
   }
   for (const item of items) {
     const li = document.createElement("li");
-    li.innerHTML = render(item);
+    const text = document.createElement("span");
+    text.textContent = render(item).label;
+    const badge = document.createElement("span");
+    badge.className = "tag " + render(item).status;
+    badge.textContent = render(item).status.replaceAll("_", " ");
+    li.append(text, badge);
     node.append(li);
   }
 }
@@ -123,18 +128,19 @@ async function tick() {
   $("step").textContent = live.step || "idle";
   $("run").textContent = live.run_id || "";
   $("summary").textContent = live.summary || live.decision || "Waiting.";
+  $("task-error").textContent = state.task_error ? "Background task error: " + state.task_error : "";
   $("cost").textContent = "Rate-limit points this run: " + (live.cost_points || 0);
   const events = tail.events || [];
-  list($("timeline"), events, (event) =>
-    event.seq + " " + event.actor + " " + event.action + tag(statusFor(event))
-  );
+  list($("timeline"), events, (event) => ({
+    label: event.seq + " " + event.actor + " " + event.action,
+    status: statusFor(event),
+  }));
   const actions = events.filter((event) =>
     ["mutate_executed", "mutate_denied", "action_planned", "tool_cancelled", "rolled_back", "idempotent_noop"].includes(event.action)
   );
   list($("actions"), actions, (event) => {
     const detail = event.detail || {};
-    const label = detail.path || detail.kind || event.action;
-    return label + tag(statusFor(event));
+    return {label: String(detail.path || detail.kind || event.action), status: statusFor(event)};
   });
   planId = live.plan && live.plan.id || "";
   const chain = $("chain");
@@ -145,8 +151,14 @@ async function tick() {
   ).join("\n") || "No events.";
 }
 
+function authHeaders() {
+  const csrf = document.querySelector('meta[name="csrf"]').content;
+  const token = document.querySelector("#token").value;
+  return {"Content-Type": "application/json", "X-CSRF-Token": csrf, "X-HijackRewind-Token": token};
+}
+
 async function post(url, body) {
-  await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body || {})});
+  await fetch(url, {method: "POST", headers: authHeaders(), body: JSON.stringify(body || {})});
   tick();
 }
 

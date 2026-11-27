@@ -1,6 +1,6 @@
 # HijackRewind
 
-HijackRewind is an open-track agent for [Agentware 2026](https://agentwarehack.com/brief/). When a GitHub account-security alert arrives, it checks that the alert is genuine, quarantines phishing and prompt-injection lures, and reverts only the unauthorized object. The default path is a local sandbox with no credentials. A verified unknown SSH key can be deleted by policy, with no mid-run click. Every other mutate waits for an approval recorded in the audit log.
+HijackRewind is an open-track agent for [Agentware 2026](https://agentwarehack.com/brief/). When a GitHub account-security alert arrives, it checks that the alert is genuine, quarantines phishing and prompt-injection lures, and reverts only a confirmed unauthorized object. The default path is a local sandbox with no credentials. Auto-execute is off unless you set a flag. `hijackrewind demo` turns SSH auto-execute on for that process only.
 
 This is the account owner's automation. It does not impersonate GitHub staff or a human correspondent.
 
@@ -19,11 +19,11 @@ flowchart TD
   api --> plan[Write a dry-run plan]
   plan --> policy{Policy in code}
   policy -->|dry-run| stop
-  policy -->|one unknown SSH key| delete[DELETE that key]
-  policy -->|anything else| approve[Wait for audited approval]
+  policy -->|confirmed and the flag is on| delete[DELETE or restore that object]
+  policy -->|anything else| approve[Wait, or refuse]
 ```
 
-The CLI and the dashboard call the same pipeline. `policy.py` is the only place a mutate is allowed.
+The CLI and the dashboard call the same pipeline. `policy.authorize` and `policy.authorize_rewind` are the only grants. `github_client.mutate` still refuses dry-run, an unknown role, and a repository path outside the configured test repo.
 
 ## 15-minute sandbox
 
@@ -38,7 +38,7 @@ python3 -m pytest
 python3 -m hijackrewind trap-pack
 ```
 
-`demo` starts the GitHub-shaped stub if nothing is already listening, plants a known-good SSH key and one unknown key, feeds a signed fixture alert, and deletes only the unknown key. That sequence, including pytest, was run from a fresh dependency install with no token.
+`demo` starts the GitHub-shaped stub if nothing is already listening, plants a known-good SSH key and one unknown key, feeds a signed fixture alert, and deletes only the unknown key because the demo process sets `auto_execute_ssh_key`. A normal `hijackrewind run` of the same file leaves the key in place and writes a plan that waits for approval. The dashboard buttons stay refused until `HIJACKREWIND_DASHBOARD_TOKEN` is set.
 
 The dashboard is the live view, the approval buttons, and the kill switch:
 
@@ -63,17 +63,25 @@ That publishes the same stub on port 8088 and Mailpit on http://127.0.0.1:8025. 
 3. For email, verify the DKIM signature. Sandbox mode uses the bundled test key and does not query DNS. Live mode queries DNS. `Authentication-Results: dkim=pass` without a signature that verifies is not enough. The signing domain must align with From and be allowlisted (default `github.com`). Lookalikes such as `github.com.evil.test` are quarantined.
 4. Extract a concrete object (key id, email, hook id, and so on) and compare it with the live API or the stub.
 5. If the object is missing, or it is on the known-good manifest, stop.
-6. Write a dry-run plan. In `dry-run` mode, stop there. In `sandbox` or `live`, policy may auto-run a reversible containment action: delete one unknown SSH key, delete an unknown deploy key, delete a webhook whose host is not allowlisted, or restore branch protection from the known-good document. Account email, GPG key, signing key, and collaborator deletes wait for `hijackrewind approve PLAN_ID`. OAuth grants, other personal access tokens, and web sessions are recorded as planned and not sent. `hijackrewind rewind ACTION_ID` restores a saved before-state when a reverse call exists.
+6. Write a plan that names the extracted claim next to the matched live object. Re-read the live object and the known-good manifest immediately before any mutate. A plan expires after `HIJACKREWIND_PLAN_TTL_SECONDS` (default 900). Approval is one-time. A denied plan cannot run. Two approvals share one lock, so at most one of them sends the mutate.
+7. Classify the object as `unknown`, `suspicious`, `confirmed`, `known`, or `unavailable`. `PlanStep.disposition` is a label only. `policy.authorize` does not read it.
+8. Auto-execute only when the caller passed `allow_auto`, the classification is `confirmed`, and the matching flag is on:
+   - `HIJACKREWIND_AUTO_EXECUTE_SSH_KEY` (default `false`): `DELETE` one confirmed unknown SSH key.
+   - `HIJACKREWIND_AUTO_EXECUTE_CONTAINMENT` (default `false`): `DELETE` a confirmed unknown deploy key, `DELETE` a confirmed webhook whose host is not on `HIJACKREWIND_WEBHOOK_HOST_ALLOWLIST`, or `PUT` the known-good branch-protection document.
+9. A confirmed account email, GPG key, signing key, or collaborator can be removed only with `hijackrewind approve PLAN_ID`. `unknown` and `suspicious` objects are not executed, even with approval. OAuth grants, other personal access tokens, and web sessions are recorded as planned and not sent. Repository deletion is refused.
+10. Before the HTTP call, write a rollback record with the before-state and the reverse intent. `hijackrewind rewind ACTION_ID` goes through `authorize_rewind` and then `mutate(..., role="rewind")`. Dry-run blocks that call inside the HTTP client. Rewind does not spend the per-run mutate cap. After the call, the client checks that the restored object is present.
 
 ## Modes and keys
 
 | Mode | API | Executes |
 | --- | --- | --- |
-| `sandbox` (default) | local stub | one unknown SSH key, if policy allows |
-| `dry-run` | local stub | never |
-| `live` | `api.github.com` | same policy, using `GITHUB_TOKEN` |
+| `sandbox` (default) | local stub | only a confirmed object whose flag is on, or an approved confirmed object |
+| `dry-run` | local stub | never, including rewind |
+| `live` | `https://api.github.com` only | the same policy, using `GITHUB_TOKEN` |
 
-Leave `GITHUB_TOKEN` empty for the sandbox. Live mode was not called against GitHub in this repository. The checks below are covered by recorded responses in `tests/fixtures/github/` and `respx`.
+`GITHUB_API_URL` must be `https://api.github.com` with no userinfo, query, or fragment. The HTTP client checks the host again before a live request, and it checks the repository owner and name on every request.
+
+Leave `GITHUB_TOKEN` empty for the sandbox. CI uses recorded responses in `tests/fixtures/github/` and `respx`. A separate live test, not part of CI, was run on 27 Nov 2026 against the disposable account `thelove987/hijackrewind-test`. A deploy key and a webhook were contained, rewind restored them, and the kill switch and `audit verify` passed. Account-wide endpoints returned 403 and failed closed with a repo-scoped token. See `docs/LIVE_TEST.md`.
 
 To try live mode yourself, use a free GitHub account that exists only for this experiment:
 
@@ -119,18 +127,29 @@ The known-good list is `sandbox/fixtures/known-good.json`. Objects on it are nev
 
 HijackRewind does not book meetings, pay bills, approve pull requests, or edit docs. The Trap Pack still runs through the same triage. Benign files are held. See `tests/trap-pack/RESULTS.md`.
 
-The optional LLM is off. If you set `HIJACKREWIND_LLM_ENABLED=true`, it may draft one explanation sentence after the decision. It cannot authorize a mutate.
+The optional LLM is off unless `HIJACKREWIND_LLM_ENABLED=true` and a base URL are set. It may draft one explanation after the decision. That text is stored on the run result for display. It is not an argument to `policy.authorize`. With the flag off, the operator sees the deterministic summary only.
 
-The policy table is in `src/hijackrewind/policy.py`. A live run against one throwaway account is described in `docs/LIVE_TEST.md`. That run has not been done here.
+## Rollback limits
+
+A rewind posts the saved public key or webhook config. GitHub does not return a webhook secret, so the restored hook has no secret. Creating the object again assigns a new id. An action whose outcome is unknown must be reconciled before rewind. A restore that does not show up on a follow-up read is `restore_unconfirmed` and is not reported as rolled back.
 
 ## Kill switch, audit log, dashboard
 
-- `hijackrewind kill` or the red **Kill switch** button sets a flag, cancels the in-flight HTTP call, and refuses later tool calls. The audit line `tool_cancelled` records that the call was in flight. `hijackrewind kill --reset` clears the flag for a later run.
-- `hijackrewind demo --kill` plants a key, starts the revert, and trips the switch while the stub is still holding the `DELETE`. The key is still there afterwards.
-- The audit log is append-only JSONL with a hash chain. `hijackrewind audit verify` checks it. There is no delete API. The dashboard shows the same verification result.
-- The dashboard polls the current step, tool calls, decision, rate-limit points, the plan, blocked outbound hosts, and the audit tail.
+- The kill flag is checked immediately before each HTTP request. `hijackrewind kill` or the red **Kill switch** button sets that flag and aborts the client call if it is still running. Later calls are refused until `hijackrewind kill --reset`.
+- Aborting the client does not cancel work GitHub has already accepted. If the mutate had been sent, the action is `outcome_unknown` and the audit note is `cancelled, outcome unknown`. `hijackrewind reconcile ACTION_ID` reads the remote object and records whether it is present or absent.
+- `hijackrewind demo --kill` plants a key, starts the revert, and trips the switch while the stub is still holding the `DELETE`. On that path the stub does not apply the delete. Reconcile is how you check a run where the server may have finished first.
+- The audit log is a tamper-evident JSONL hash chain. Appends take a file lock. A malformed line fails `hijackrewind audit verify` with `malformed json`. A checkpoint file stores the latest hash, and optionally an HMAC when `HIJACKREWIND_AUDIT_HMAC_KEY` is set. If the log tail is truncated and the checkpoint remains, verify fails. There is no delete API.
+- The dashboard binds to `127.0.0.1`. Mutating routes require a local `Host`, a local `Origin` when one is sent, `X-HijackRewind-Token` equal to `HIJACKREWIND_DASHBOARD_TOKEN`, and `X-CSRF-Token` equal to the token in the page. An empty operator token is 401. Untrusted audit text is inserted with `textContent`. The sandbox demo button refuses to run when the process is in live mode. A background task exception is shown as `task_error`.
 
-`DELETE` counts as 5 rate-limit points and `GET` as 1, matching GitHub's documented costs. The default cap is one mutate per run.
+`POST`, `PUT`, `PATCH`, and `DELETE` count as 5 rate-limit points. `GET` counts as 1. The default cap is one execute mutate per run. Rewind does not spend that cap. `GET` may retry 429, 500, 502, and 503. Mutating calls are not retried.
+
+## Threat model
+
+The asset is the configured test account, or the local stub standing in for it, plus the audit log. The expected adversary is a forged or replayed alert, a document that tries to instruct the agent, or a browser page that tries to press a dashboard button.
+
+The checks that hold that boundary are cryptographic DKIM (From, Subject, and Date must be signed; `l=` is rejected; `t=` and Date must fall inside 14 days; a repeated Message-ID plus signature is rejected), claims taken only from the signed `text/plain` part, classification against the live object and the known-good manifest, a code policy that ignores the plan's disposition label, a dry-run block inside the HTTP client, a rollback record written before the request, plan expiry and one-time approval under a single execution lock, and dashboard token, CSRF, and local origin checks.
+
+Out of scope: cancelling a GitHub mutation the server has already applied, restoring a webhook secret, keeping the same id after a recreate, revoking OAuth grants, other personal access tokens, or web sessions, and calling any host other than the stub or `https://api.github.com`.
 
 ## Trap Pack
 

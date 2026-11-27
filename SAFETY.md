@@ -6,15 +6,16 @@ The controls below are Python. A sentence inside an alert, a page, or a model re
 
 ## Guardrails
 
-`policy.authorize` allows a `DELETE` only when all of these are true:
+`policy.authorize` allows a mutate only when all of these are true:
 
-- The mode is `sandbox` or `live` (`dry-run` stops after the plan).
+- The mode is `sandbox` or `live`. Dry-run is refused here and again in `github_client.mutate`, including rewind.
+- The classification, computed from the live before-state and the known-good manifest, is `confirmed`. The plan's disposition label is ignored. `unknown` and `suspicious` stay unexecuted even if an operator approves them.
 - The path is on the revert allowlist and, for a repo path, the owner and name are the configured test repo.
 - The object is not on the known-good manifest and is not the primary email.
-- The run still has mutate budget (default 1).
-- Either the plan is exactly one unknown SSH key and auto-execute is on, or an operator approval event is already in the audit log.
+- The run still has mutate budget (default 1) when the role is execute.
+- Auto-execute also needs `allow_auto` and the flag for that kind. Otherwise a confirmed object needs a one-time approval. A denied or expired plan cannot run.
 
-The client enforces the same path and host rules again at send time. Query strings on API calls are refused. Redirects are refused. `GET` retries at most once, and only when `Retry-After` is within `HIJACKREWIND_MAX_RETRY_WAIT` (default 2 seconds). `DELETE` is not retried.
+The client enforces the same path and host rules again at send time. Live mode accepts only `https://api.github.com`. Query strings on API calls are refused. Redirects are refused. `GET` retries 429, 500, 502, and 503 when the wait is within `HIJACKREWIND_MAX_RETRY_WAIT` (default 2 seconds). Mutating methods are not retried. `POST`, `PUT`, `PATCH`, and `DELETE` cost 5 rate-limit points. `GET` costs 1.
 
 Lure URLs found in untrusted content are recorded as blocked outbound and are not opened, even when the host is `127.0.0.1`. The only fetch of a page is the URL the operator passed in, and only if that host is localhost.
 
@@ -22,19 +23,19 @@ Secret-shaped lines (exported keys, a passphrase answer) are omitted from the sh
 
 ## Kill switch
 
-`KillSwitch.trip` sets a flag the HTTP task polls. The in-flight `httpx` task is cancelled and the client is closed. The stub records the disconnect when the delayed `DELETE` is cancelled, and it does not apply the delete. Later calls raise `ToolCancelled` until `hijackrewind kill --reset`.
+`KillSwitch.trip` sets a flag that is checked immediately before each request. If the HTTP task is still running, it is cancelled and the client is closed. When the mutate had already been sent, the action becomes `outcome_unknown` and the audit note is `cancelled, outcome unknown`. That is a client abort. It is not a server-side cancellation. `hijackrewind reconcile ACTION_ID` reads the remote object. Later calls raise `ToolCancelled` until `hijackrewind kill --reset`.
 
 The dashboard button and `hijackrewind kill` use that flag. Killing the OS process is not the switch the tests or the demo use.
 
-`hijackrewind demo --kill` is the short repro: the stub holds the delete, the switch trips, the audit action is `run_cancelled`, and key 99 is still present.
+`hijackrewind demo --kill` is the short repro where the stub is still holding the delete, so it does not apply it. The audit action includes `run_cancelled`. Key 99 is still present on that path. If a later run loses the response after the server applied the change, reconcile is the check.
 
 ## Live monitoring
 
-The dashboard at `127.0.0.1:8765` shows the step, tool calls, decision, rate-limit points, plan, blocked hosts, and audit tail. It polls twice a second. It binds to localhost so a remote host cannot press approve or kill.
+The dashboard at `127.0.0.1:8765` shows the step, tool calls, decision, rate-limit points, plan, blocked hosts, audit tail, and a background task error when one was raised. Mutating routes require a local Host, a local Origin when the browser sends one, the operator token, and the CSRF token. Untrusted text is set with `textContent`. The sandbox demo button does not run in live mode.
 
 ## Audit trail
 
-`audit.jsonl` is opened with `O_APPEND` only. Each event stores `seq`, `prev_hash`, and `hash` over the canonical JSON of the previous hash plus the event. `AuditLog` has append, read, and verify. It has no update and no delete. `hijackrewind audit --verify` walks the chain. Editing a past line fails verification. The same events show on the dashboard.
+The log is tamper-evident. Each append takes a file lock, then writes `seq`, `prev_hash`, and `hash` over the canonical JSON of the previous hash plus the event. A checkpoint file stores the latest hash, and an HMAC of that hash when `HIJACKREWIND_AUDIT_HMAC_KEY` is set. `AuditLog` has append, read, and verify. It has no update and no delete. `hijackrewind audit verify` walks the chain, rejects malformed JSON, and rejects a checkpoint that does not match the tail. The same events show on the dashboard.
 
 ## Fail closed
 

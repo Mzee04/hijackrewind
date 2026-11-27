@@ -53,6 +53,76 @@ def test_valid_signature_verifies_offline():
     assert dkim.verify(signed, dnsfunc=local_dns) is True
 
 
+def test_body_length_tag_is_rejected():
+    pem, _txt = _key_for("github.com", selector="length")
+    signature = dkim.sign(
+        _message("github.com"),
+        b"length",
+        b"github.com",
+        pem,
+        include_headers=[b"from", b"to", b"subject", b"date", b"message-id"],
+        length=True,
+    )
+    result = check_signature(signature + _message("github.com"), dns="local")
+    assert not result.ok
+    assert "l=" in result.reason
+
+
+def test_signature_must_cover_from_subject_and_date():
+    pem, _txt = _key_for("github.com", selector="partial")
+    signed = sign_message(_message("github.com"), selector="partial", domain="github.com", privkey_pem=pem)
+    bare = dkim.sign(
+        _message("github.com"),
+        b"partial",
+        b"github.com",
+        pem,
+        include_headers=[b"from", b"to", b"message-id"],
+    )
+    result = check_signature(bare + _message("github.com"), dns="local")
+    assert not result.ok
+    assert "does not cover" in result.reason
+    assert "subject" in result.reason
+    assert "date" in result.reason
+    assert check_signature(signed, dns="local").ok
+
+
+def test_stale_date_is_rejected():
+    pem, _txt = _key_for("github.com", selector="stale")
+    raw = _message("github.com").replace(
+        b"Date: Fri, 27 Nov 2026 18:05:00 +0000",
+        b"Date: Fri, 01 Jan 2021 00:00:00 +0000",
+    )
+    signed = sign_message(raw, selector="stale", domain="github.com", privkey_pem=pem)
+    result = check_signature(signed, dns="local")
+    assert not result.ok
+    assert "freshness" in result.reason or "Date" in result.reason
+
+
+def test_claims_come_from_the_plain_part():
+    from hijackrewind.dkim_verify import claim_text
+
+    raw = (
+        b"From: GitHub <noreply@github.com>\r\n"
+        b"Subject: alert\r\n"
+        b"Date: Fri, 27 Nov 2026 18:05:00 +0000\r\n"
+        b"MIME-Version: 1.0\r\n"
+        b"Content-Type: multipart/alternative; boundary=bound\r\n"
+        b"\r\n"
+        b"--bound\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n"
+        b"\r\n"
+        b"Key id: 99\r\n"
+        b"--bound\r\n"
+        b"Content-Type: text/html; charset=utf-8\r\n"
+        b"\r\n"
+        b"<p>Key id: 1</p>\r\n"
+        b"--bound--\r\n"
+    )
+    text = claim_text(raw)
+    assert "Key id: 99" in text
+    assert "Key id: 1" not in text
+
+
 def test_tampered_body_fails():
     pem, _txt = _key_for("github.com", selector="tamper")
     signed = sign_message(_message("github.com"), selector="tamper", domain="github.com", privkey_pem=pem)

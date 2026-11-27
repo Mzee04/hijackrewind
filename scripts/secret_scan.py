@@ -13,9 +13,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SKIP_DIRS = {".git", ".venv", "venv", ".hijackrewind", "__pycache__", ".pytest_cache"}
 PATTERNS = [
-    re.compile(r"ghp_[A-Za-z0-9]{20,}"),
+    re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}"),
     re.compile(r"github_pat_[A-Za-z0-9_]{16,}"),
     re.compile(r"sk-[A-Za-z0-9]{20,}"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
     re.compile(r"-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----"),
     re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}"),
 ]

@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 
-from hijackrewind.config import Settings
+from hijackrewind.config import Settings, reveal
 from hijackrewind.egress import EgressDenied, EgressLog, repo_is_configured
 from hijackrewind.killswitch import KillSwitch, ToolCancelled
 from hijackrewind.monitor import Monitor
@@ -28,6 +28,14 @@ class MutateCapExceeded(GitHubError):
     pass
 
 
+class DryRunBlocked(GitHubError):
+    pass
+
+
+class OutcomeUnknown(GitHubError):
+    """The mutate was sent and then interrupted. The server may or may not have applied it."""
+
+
 class CostMeter:
     def __init__(self, cap: int) -> None:
         self.cap = cap
@@ -36,7 +44,7 @@ class CostMeter:
         self.remaining: int | None = None
 
     def charge(self, method: str) -> None:
-        self.points += 5 if method.upper() == "DELETE" else 1
+        self.points += 5 if method.upper() in {"POST", "PUT", "PATCH", "DELETE"} else 1
 
     def can_mutate(self) -> bool:
         return self.mutates < self.cap
@@ -72,13 +80,18 @@ class GitHubClient:
     async def delete(self, path: str, body: dict | None = None) -> str:
         return await self.mutate("DELETE", path, body)
 
-    async def mutate(self, method: str, path: str, body: dict | None = None, *, count_cap: bool = True) -> str:
+    async def mutate(self, method: str, path: str, body: dict | None = None, *, role: str = "execute") -> str:
+        if self.settings.mode == "dry-run":
+            raise DryRunBlocked("dry-run refuses the HTTP mutation")
         if method not in {"DELETE", "PUT", "POST"}:
             raise GitHubError(f"{method} is not a mutate this client will send")
-        if count_cap:
+        if role not in {"execute", "rewind"}:
+            raise GitHubError("mutation role was not authorized")
+        if role == "execute":
             if not self.meter.can_mutate():
                 raise MutateCapExceeded("per-run mutate cap reached")
             self.meter.mark_mutate()
+        self.kill.raise_if_tripped()
         response = await self._request(method, path, mutate=True, json_body=body)
         if method == "DELETE" and response.status_code == 404:
             return "absent"
@@ -103,25 +116,49 @@ class GitHubClient:
         self.egress.assert_api(method, url)
         headers = {"Accept": "application/vnd.github+json", "User-Agent": "HijackRewind"}
         if self.settings.mode == "live":
-            if not self.settings.github_token:
+            token = reveal(self.settings.github_token)
+            if not token:
                 raise GitHubError("live mode needs GITHUB_TOKEN in the environment")
-            headers["Authorization"] = f"Bearer {self.settings.github_token}"
+            if self.settings.api_host() != "api.github.com":
+                raise GitHubError("live mode only calls api.github.com")
+            headers["Authorization"] = f"Bearer {token}"
         if mutate and self.settings.uses_stub() and self.settings.delete_delay > 0:
             headers["X-HijackRewind-Delay"] = str(self.settings.delete_delay)
         attempt = 0
         while True:
+            self.kill.raise_if_tripped()
             try:
                 response = await self._send(method, url, headers=headers, json_body=json_body)
             except ToolCancelled:
                 if self.monitor:
                     self.monitor.tool(f"{method} {path}", "cancelled")
+                detail = {"method": method, "path": path, "state": "in_flight"}
+                if mutate:
+                    detail["note"] = "cancelled, outcome unknown"
+                    self.egress.audit.append(
+                        run_id=self.egress.run_id,
+                        actor="kill_switch",
+                        action="tool_cancelled",
+                        detail=detail,
+                    )
+                    raise OutcomeUnknown("cancelled, outcome unknown")
                 self.egress.audit.append(
                     run_id=self.egress.run_id,
                     actor="kill_switch",
                     action="tool_cancelled",
-                    detail={"method": method, "path": path, "state": "in_flight"},
+                    detail=detail,
                 )
                 raise
+            except httpx.TimeoutException as exc:
+                if mutate:
+                    self.egress.audit.append(
+                        run_id=self.egress.run_id,
+                        actor="agent",
+                        action="tool_cancelled",
+                        detail={"method": method, "path": path, "note": "cancelled, outcome unknown"},
+                    )
+                    raise OutcomeUnknown("cancelled, outcome unknown") from exc
+                raise GitHubError("request timed out") from exc
             self._read_rate(response)
             self.meter.charge(method)
             if self.monitor:

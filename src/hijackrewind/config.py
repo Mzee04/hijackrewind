@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,7 +23,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("HIJACKREWIND_MODE", "MODE"),
     )
     stub_url: str = Field(default="http://127.0.0.1:8088", validation_alias="HIJACKREWIND_STUB_URL")
-    github_token: str = Field(default="", validation_alias="GITHUB_TOKEN")
+    github_token: SecretStr = Field(default=SecretStr(""), validation_alias="GITHUB_TOKEN")
     github_api_url: str = Field(default="https://api.github.com", validation_alias="GITHUB_API_URL")
     test_repo_owner: str = Field(default="test-owner", validation_alias="TEST_REPO_OWNER")
     test_repo_name: str = Field(default="test-repo", validation_alias="TEST_REPO_NAME")
@@ -32,13 +32,17 @@ class Settings(BaseSettings):
         validation_alias="HIJACKREWIND_MANIFEST",
     )
     sender_allowlist: str = Field(default="github.com", validation_alias="HIJACKREWIND_SENDER_ALLOWLIST")
-    auto_execute_ssh_key: bool = Field(default=True, validation_alias="HIJACKREWIND_AUTO_EXECUTE_SSH_KEY")
+    auto_execute_ssh_key: bool = Field(default=False, validation_alias="HIJACKREWIND_AUTO_EXECUTE_SSH_KEY")
+    auto_execute_containment: bool = Field(default=False, validation_alias="HIJACKREWIND_AUTO_EXECUTE_CONTAINMENT")
     mutate_cap: int = Field(default=1, validation_alias="HIJACKREWIND_MUTATE_CAP")
     dashboard_host: str = Field(default="127.0.0.1", validation_alias="HIJACKREWIND_DASHBOARD_HOST")
     dashboard_port: int = Field(default=8765, validation_alias="HIJACKREWIND_DASHBOARD_PORT")
     llm_enabled: bool = Field(default=False, validation_alias="HIJACKREWIND_LLM_ENABLED")
     llm_base_url: str = Field(default="", validation_alias="HIJACKREWIND_LLM_BASE_URL")
-    llm_api_key: str = Field(default="", validation_alias="HIJACKREWIND_LLM_API_KEY")
+    llm_api_key: SecretStr = Field(default=SecretStr(""), validation_alias="HIJACKREWIND_LLM_API_KEY")
+    dashboard_token: SecretStr = Field(default=SecretStr(""), validation_alias="HIJACKREWIND_DASHBOARD_TOKEN")
+    audit_hmac_key: SecretStr = Field(default=SecretStr(""), validation_alias="HIJACKREWIND_AUDIT_HMAC_KEY")
+    plan_ttl_seconds: int = Field(default=900, validation_alias="HIJACKREWIND_PLAN_TTL_SECONDS")
     llm_model: str = Field(default="", validation_alias="HIJACKREWIND_LLM_MODEL")
     mailpit_url: str = Field(default="http://127.0.0.1:8025", validation_alias="MAILPIT_URL")
     trace_dir: str = Field(default="traces", validation_alias="HIJACKREWIND_TRACE_DIR")
@@ -53,6 +57,16 @@ class Settings(BaseSettings):
 
     def webhook_hosts(self) -> set[str]:
         return {part.strip().lower() for part in self.webhook_host_allowlist.split(",") if part.strip()}
+
+    @field_validator("github_api_url")
+    @classmethod
+    def _official_api(cls, value: str) -> str:
+        parsed = urlparse(value)
+        if parsed.scheme != "https" or (parsed.hostname or "").lower() != "api.github.com":
+            raise ValueError("GITHUB_API_URL must be https://api.github.com")
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError("GITHUB_API_URL must be https://api.github.com with no userinfo or query")
+        return "https://api.github.com"
 
     def dkim_mode(self) -> str:
         choice = self.dkim_dns.strip().lower()
@@ -75,7 +89,12 @@ class Settings(BaseSettings):
         return self.mode != "live"
 
     def secret_values(self) -> list[str]:
-        values = [self.github_token, self.llm_api_key]
+        values = [
+            reveal(self.github_token),
+            reveal(self.llm_api_key),
+            reveal(self.dashboard_token),
+            reveal(self.audit_hmac_key),
+        ]
         return [value for value in values if value]
 
     def kill_file(self) -> Path:
@@ -83,6 +102,14 @@ class Settings(BaseSettings):
 
     def plan_dir(self) -> Path:
         return Path(self.home) / "plans"
+
+
+def reveal(value: SecretStr | str | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, SecretStr):
+        return value.get_secret_value()
+    return str(value)
 
 
 def load_settings(env_file: str | None = ".env") -> Settings:

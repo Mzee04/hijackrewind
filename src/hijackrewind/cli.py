@@ -11,7 +11,7 @@ import uvicorn
 from hijackrewind import __version__
 from hijackrewind.config import load_settings
 from hijackrewind.dashboard import create_dashboard
-from hijackrewind.actions import rewind
+from hijackrewind.actions import reconcile, rewind
 from hijackrewind.pipeline import execute_saved_plan, run_source
 from hijackrewind.preflight import live_preflight
 from hijackrewind.runtime import (
@@ -61,6 +61,8 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("audit_cmd", nargs="?", choices=("verify",))
     rewind_cmd = sub.add_parser("rewind", help="Roll back one reversible action")
     rewind_cmd.add_argument("action_id")
+    reconcile_cmd = sub.add_parser("reconcile", help="Check remote state after an interrupted mutate")
+    reconcile_cmd.add_argument("action_id")
 
     sub.add_parser("dashboard", help="Local monitoring page, approvals, and the kill switch")
     sub.add_parser("trap-pack", help="Run the vendored Agentware Trap Pack inputs")
@@ -88,6 +90,8 @@ def main(argv: list[str] | None = None) -> int:
         return _audit(verify_only=args.verify or args.audit_cmd == "verify")
     if args.command == "rewind":
         return asyncio.run(_rewind(args.action_id))
+    if args.command == "reconcile":
+        return asyncio.run(_reconcile(args.action_id))
     if args.command == "dashboard":
         return _dashboard()
     if args.command == "trap-pack":
@@ -120,6 +124,7 @@ async def _demo(kill_scene: bool) -> int:
         print("demo refuses live mode. Use the sandbox default.", file=sys.stderr)
         return 2
     ensure_stub(settings)
+    settings.auto_execute_ssh_key = True
     if kill_scene:
         settings.delete_delay = 2.0
     services = build_services(settings)
@@ -178,6 +183,21 @@ async def _approve(plan_id: str, *, approved: bool) -> int:
         return 2
     _print_result(result)
     return 0 if result.status != "failed" else 1
+
+
+async def _reconcile(action_id: str) -> int:
+    settings = load_settings()
+    if settings.mode != "live":
+        ensure_stub(settings)
+    services = build_services(settings)
+    try:
+        record = await reconcile(services, action_id)
+    except FileNotFoundError:
+        print(f"no action {action_id}", file=sys.stderr)
+        return 2
+    print(f"remote: {record.get('reconciled')}")
+    print(f"status: {record.get('status')}")
+    return 0
 
 
 async def _rewind(action_id: str) -> int:
