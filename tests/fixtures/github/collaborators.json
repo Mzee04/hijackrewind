@@ -1,0 +1,4 @@
+[
+  {"login": "owner", "role_name": "admin"},
+  {"login": "stranger", "role_name": "write"}
+]

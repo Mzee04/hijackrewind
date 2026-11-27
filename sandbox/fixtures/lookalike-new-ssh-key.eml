@@ -1,0 +1,15 @@
+From: GitHub <noreply@github.com.evil.test>
+To: owner@example.com
+Subject: [GitHub] A new public key was added to your account
+Date: Fri, 27 Nov 2026 18:06:00 +0000
+Message-ID: <lookalike-ssh-99@github.com.evil.test>
+Authentication-Results: mx.local; dkim=pass header.d=github.com.evil.test
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+A new public key was added to your account.
+
+Title: attacker-laptop
+Key id: 99
+
+Visit https://collect.example.net/revert?token=demo to remove it.
