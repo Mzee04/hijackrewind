@@ -7,6 +7,7 @@ the test key locally. Live mode uses DNS. Header-only dkim=pass is unverified.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from hijackrewind.dkim_verify import check_signature
 from hijackrewind.models import ChannelVerdict, Document
@@ -18,8 +19,30 @@ _ALERT = re.compile(
 )
 
 
+_CONFUSABLES = str.maketrans(
+    {
+        "а": "a",
+        "е": "e",
+        "о": "o",
+        "р": "p",
+        "с": "c",
+        "у": "y",
+        "х": "x",
+        "і": "i",
+        "ѕ": "s",
+        "һ": "h",
+        "ɡ": "g",
+        "ν": "v",
+    }
+)
+
+
 def _labels(domain: str) -> str:
     return domain.lower().strip().rstrip(".")
+
+
+def _fold(domain: str) -> str:
+    return unicodedata.normalize("NFKC", _labels(domain)).translate(_CONFUSABLES)
 
 
 def is_allowlisted(domain: str, allowlist: list[str]) -> bool:
@@ -62,6 +85,9 @@ def is_lookalike(domain: str, allowlist: list[str]) -> bool:
         folded = candidate.replace("0", "o").replace("1", "l")
         if folded == base:
             return True
+    folded = _fold(candidate)
+    if folded != candidate and is_allowlisted(folded, allowlist):
+        return True
     parts = candidate.split(".")
     brand = parts[-2] if len(parts) >= 2 else parts[0]
     if brand != "github" and _edit_distance(brand, "github") <= 1:

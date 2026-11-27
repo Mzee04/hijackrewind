@@ -135,6 +135,8 @@ def test_dashboard_kill_and_state(settings):
     page = client.get("/")
     assert page.status_code == 200
     assert "Kill switch" in page.text
+    assert "Audit chain" in page.text
+    assert "Timeline" in page.text
     killed = client.post("/api/kill", json={"reason": "button"})
     assert killed.status_code == 200
     state = client.get("/api/state").json()

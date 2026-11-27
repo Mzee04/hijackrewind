@@ -11,6 +11,7 @@ import uvicorn
 from hijackrewind import __version__
 from hijackrewind.config import load_settings
 from hijackrewind.dashboard import create_dashboard
+from hijackrewind.actions import rewind
 from hijackrewind.pipeline import execute_saved_plan, run_source
 from hijackrewind.preflight import live_preflight
 from hijackrewind.runtime import (
@@ -57,6 +58,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     audit = sub.add_parser("audit", help="Print the append-only audit log")
     audit.add_argument("--verify", action="store_true")
+    audit.add_argument("audit_cmd", nargs="?", choices=("verify",))
+    rewind_cmd = sub.add_parser("rewind", help="Roll back one reversible action")
+    rewind_cmd.add_argument("action_id")
 
     sub.add_parser("dashboard", help="Local monitoring page, approvals, and the kill switch")
     sub.add_parser("trap-pack", help="Run the vendored Agentware Trap Pack inputs")
@@ -81,7 +85,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "deny":
         return asyncio.run(_approve(args.plan_id, approved=False))
     if args.command == "audit":
-        return _audit(verify_only=args.verify)
+        return _audit(verify_only=args.verify or args.audit_cmd == "verify")
+    if args.command == "rewind":
+        return asyncio.run(_rewind(args.action_id))
     if args.command == "dashboard":
         return _dashboard()
     if args.command == "trap-pack":
@@ -172,6 +178,24 @@ async def _approve(plan_id: str, *, approved: bool) -> int:
         return 2
     _print_result(result)
     return 0 if result.status != "failed" else 1
+
+
+async def _rewind(action_id: str) -> int:
+    settings = load_settings()
+    if settings.mode != "live":
+        ensure_stub(settings)
+    services = build_services(settings)
+    try:
+        record = await rewind(services, action_id)
+    except FileNotFoundError:
+        print(f"no action {action_id}", file=sys.stderr)
+        return 2
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(f"status: {record['status']}")
+    print(f"action: {action_id}")
+    return 0
 
 
 def _audit(*, verify_only: bool) -> int:

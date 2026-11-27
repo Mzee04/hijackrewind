@@ -5,197 +5,143 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HijackRewind</title>
 <style>
-  :root {
-    color-scheme: dark;
-    --bg: #12151c;
-    --panel: #1c2230;
-    --ink: #eef2f6;
-    --muted: #a8b3c4;
-    --line: #313a4d;
-    --ok: #7dcea0;
-    --warn: #f0c674;
-    --stop: #e06c75;
-    --accent: #8ab4f8;
-  }
+  :root { color-scheme: light; }
   * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    font: 16px/1.45 "Segoe UI", sans-serif;
-    background: var(--bg);
-    color: var(--ink);
-  }
-  header {
-    display: flex;
-    justify-content: space-between;
-    gap: 16px;
-    align-items: center;
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--line);
-    background: #0e1117;
-  }
-  h1 { font-size: 20px; margin: 0; }
-  h2 { font-size: 15px; margin: 0 0 8px; color: var(--muted); font-weight: 600; }
-  p { margin: 0; }
-  button, input {
-    font: inherit;
-    border-radius: 8px;
-    border: 1px solid var(--line);
-    background: #2a3344;
-    color: var(--ink);
-    padding: 8px 12px;
-  }
+  body { margin: 0; font: 18px/1.45 "Segoe UI", sans-serif; background: #f4f6f8; color: #1b1f24; }
+  header { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 16px 24px; background: #fff; border-bottom: 1px solid #d5dbe3; position: sticky; top: 0; }
+  h1 { margin: 0; font-size: 28px; }
+  h2 { margin: 0 0 10px; font-size: 16px; letter-spacing: .04em; text-transform: uppercase; color: #526070; }
+  button, input { font: inherit; border-radius: 10px; border: 1px solid #c5ced8; background: #fff; padding: 10px 14px; }
   button { cursor: pointer; }
-  button.kill {
-    background: var(--stop);
-    color: #1a0b0d;
-    border: 0;
-    font-weight: 700;
-    min-width: 160px;
-    min-height: 44px;
-  }
-  button.kill[disabled] { opacity: 0.55; }
-  main {
-    display: grid;
-    grid-template-columns: 1.2fr 0.8fr;
-    gap: 16px;
-    padding: 16px 20px 32px;
-  }
-  section {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    padding: 14px;
-    margin-bottom: 16px;
-  }
-  .pill {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 999px;
-    background: #2a3344;
-    color: var(--accent);
-    font-size: 13px;
-  }
+  button.kill { background: #c62828; color: #fff; border: 0; font-weight: 800; font-size: 22px; min-width: 220px; min-height: 64px; }
+  button.kill:disabled { background: #8d8d8d; }
+  main { display: grid; grid-template-columns: 1.3fr .7fr; gap: 16px; padding: 16px 24px 40px; }
+  section { background: #fff; border: 1px solid #d5dbe3; border-radius: 14px; padding: 16px; margin-bottom: 16px; }
+  .pill { display: inline-block; padding: 4px 10px; border-radius: 999px; background: #e8eef6; font-weight: 700; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  ol, ul { margin: 8px 0 0; padding-left: 18px; }
-  li { margin: 4px 0; }
-  code, pre {
-    font-family: ui-monospace, monospace;
-    font-size: 13px;
-  }
-  pre {
-    white-space: pre-wrap;
-    word-break: break-word;
-    background: #0e1117;
-    padding: 10px;
-    border-radius: 8px;
-    max-height: 240px;
-    overflow: auto;
-  }
-  .muted { color: var(--muted); }
-  .stop { color: var(--stop); }
-  .ok { color: var(--ok); }
-  @media (max-width: 800px) {
-    main { grid-template-columns: 1fr; }
-    header { align-items: flex-start; flex-direction: column; }
-  }
+  ol { margin: 0; padding-left: 22px; }
+  li { margin: 8px 0; }
+  .tag { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 999px; font-size: 14px; font-weight: 700; background: #eceff3; }
+  .tag.auto { background: #d9f2e3; }
+  .tag.held, .tag.approval { background: #fff3cd; }
+  .tag.cancelled, .tag.in_flight { background: #f8d0d0; }
+  .tag.rolled_back, .tag.rolled { background: #d6e4ff; }
+  .tag.unavailable { background: #eceff3; }
+  pre { white-space: pre-wrap; word-break: break-word; background: #f7f9fb; padding: 12px; border-radius: 10px; max-height: 280px; overflow: auto; font-size: 14px; }
+  .ok { color: #1b7f3b; font-weight: 700; }
+  .bad { color: #c62828; font-weight: 700; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } header { flex-direction: column; align-items: stretch; } }
 </style>
 </head>
 <body>
 <header>
   <div>
     <h1>HijackRewind</h1>
-    <p class="muted" id="mode">loading</p>
+    <p id="mode">loading</p>
   </div>
-  <div class="row">
-    <button id="demo" type="button">Run sandbox demo</button>
-    <button id="kill" class="kill" type="button">Kill switch</button>
-  </div>
+  <button id="kill" class="kill" type="button">Kill switch</button>
 </header>
 <main>
   <div>
     <section>
-      <h2>Live run</h2>
+      <h2>Incident</h2>
       <p><span class="pill" id="step">idle</span> <span id="run"></span></p>
-      <p id="summary" style="margin-top:8px">No run yet.</p>
-      <p class="muted" id="cost" style="margin-top:8px">Rate-limit points this run: 0</p>
+      <p id="summary">No run yet.</p>
+      <p id="cost">Rate-limit points this run: 0</p>
     </section>
     <section>
-      <h2>Tool calls</h2>
-      <ol id="tools"><li class="muted">none</li></ol>
+      <h2>Timeline</h2>
+      <ol id="timeline"><li>none</li></ol>
     </section>
     <section>
-      <h2>Start a path</h2>
+      <h2>Start</h2>
       <form id="run-form" class="row">
-        <input id="source" name="source" size="48" placeholder="sandbox/fixtures/genuine-new-ssh-key.eml" aria-label="Alert path">
+        <input id="source" name="source" size="42" placeholder="sandbox/fixtures/genuine-new-ssh-key.eml" aria-label="Alert path">
         <button type="submit">Run</button>
+        <button id="demo" type="button">Sandbox demo</button>
       </form>
-      <p class="muted" style="margin-top:8px">The SSH-key demo executes by policy. Other reverts wait for approval.</p>
     </section>
   </div>
   <div>
     <section>
-      <h2>Plan</h2>
-      <pre id="plan">No plan.</pre>
-      <div class="row" style="margin-top:8px">
-        <button id="approve" type="button">Approve</button>
+      <h2>Actions</h2>
+      <ol id="actions"><li>none</li></ol>
+      <div class="row" style="margin-top:10px">
+        <button id="approve" type="button">Approve held plan</button>
         <button id="deny" type="button">Deny</button>
       </div>
     </section>
     <section>
-      <h2>Blocked outbound</h2>
-      <ul id="blocked"><li class="muted">none</li></ul>
-    </section>
-    <section>
-      <h2>Audit tail</h2>
+      <h2>Audit chain</h2>
+      <p id="chain">checking</p>
       <pre id="audit">No events.</pre>
     </section>
   </div>
 </main>
 <script>
-const step = document.querySelector("#step");
-const run = document.querySelector("#run");
-const summary = document.querySelector("#summary");
-const cost = document.querySelector("#cost");
-const tools = document.querySelector("#tools");
-const plan = document.querySelector("#plan");
-const blocked = document.querySelector("#blocked");
-const audit = document.querySelector("#audit");
-const mode = document.querySelector("#mode");
-const kill = document.querySelector("#kill");
+const $ = (id) => document.querySelector(id);
 let planId = "";
+
+function tag(status) {
+  const name = status || "noted";
+  return '<span class="tag ' + name + '">' + name.replaceAll("_", " ") + "</span>";
+}
 
 function list(node, items, render) {
   node.replaceChildren();
   if (!items.length) {
     const li = document.createElement("li");
-    li.className = "muted";
     li.textContent = "none";
     node.append(li);
     return;
   }
   for (const item of items) {
     const li = document.createElement("li");
-    li.textContent = render(item);
+    li.innerHTML = render(item);
     node.append(li);
   }
+}
+
+function statusFor(event) {
+  const detail = event.detail || {};
+  if (event.action === "tool_cancelled" || event.action === "run_cancelled") return "cancelled";
+  if (event.action === "rolled_back") return "rolled_back";
+  if (event.action === "action_planned") return "unavailable";
+  if (event.action === "mutate_denied") return "held";
+  if (event.action === "mutate_executed") return detail.status || "auto";
+  if (event.action === "idempotent_noop") return "auto";
+  return "noted";
 }
 
 async function tick() {
   const state = await (await fetch("/api/state")).json();
   const tail = await (await fetch("/api/audit")).json();
-  mode.textContent = state.mode + (state.kill.tripped ? " · kill switch tripped" : " · kill switch clear");
-  kill.disabled = state.kill.tripped;
+  const kill = state.kill || {};
+  $("mode").textContent = (state.mode || "") + (kill.tripped ? " · kill switch tripped" : " · kill switch clear");
+  $("kill").disabled = !!kill.tripped;
   const live = state.run || {};
-  step.textContent = live.step || "idle";
-  run.textContent = live.run_id ? live.run_id : "";
-  summary.textContent = live.summary || live.decision || "Waiting.";
-  cost.textContent = "Rate-limit points this run: " + (live.cost_points || 0);
-  list(tools, live.tools || [], (item) => item.name + " → " + item.outcome);
-  list(blocked, live.blocked || [], (item) => (item.kind || "http") + " " + (item.host || "") + (item.path || ""));
+  $("step").textContent = live.step || "idle";
+  $("run").textContent = live.run_id || "";
+  $("summary").textContent = live.summary || live.decision || "Waiting.";
+  $("cost").textContent = "Rate-limit points this run: " + (live.cost_points || 0);
+  const events = tail.events || [];
+  list($("timeline"), events, (event) =>
+    event.seq + " " + event.actor + " " + event.action + tag(statusFor(event))
+  );
+  const actions = events.filter((event) =>
+    ["mutate_executed", "mutate_denied", "action_planned", "tool_cancelled", "rolled_back", "idempotent_noop"].includes(event.action)
+  );
+  list($("actions"), actions, (event) => {
+    const detail = event.detail || {};
+    const label = detail.path || detail.kind || event.action;
+    return label + tag(statusFor(event));
+  });
   planId = live.plan && live.plan.id || "";
-  plan.textContent = live.plan ? JSON.stringify(live.plan, null, 2) : "No plan.";
-  audit.textContent = (tail.events || []).map((event) =>
-    event.seq + " " + event.actor + " " + event.action + " " + (event.detail && event.detail.status || event.detail && event.detail.reason || "")
+  const chain = $("chain");
+  chain.className = tail.ok ? "ok" : "bad";
+  chain.textContent = tail.ok ? "Hash chain verified (" + (tail.detail || "") + ")" : "Hash chain failed (" + (tail.detail || "") + ")";
+  $("audit").textContent = events.map((event) =>
+    event.seq + " " + event.action + " " + (event.hash || "").slice(0, 12)
   ).join("\n") || "No events.";
 }
 
@@ -204,11 +150,11 @@ async function post(url, body) {
   tick();
 }
 
-document.querySelector("#kill").addEventListener("click", () => post("/api/kill", {reason: "dashboard button"}));
-document.querySelector("#demo").addEventListener("click", () => post("/api/demo", {}));
-document.querySelector("#approve").addEventListener("click", () => { if (planId) post("/api/plans/" + planId + "/approve", {}); });
-document.querySelector("#deny").addEventListener("click", () => { if (planId) post("/api/plans/" + planId + "/deny", {}); });
-document.querySelector("#run-form").addEventListener("submit", (event) => {
+$("kill").addEventListener("click", () => post("/api/kill", {reason: "dashboard button"}));
+$("demo").addEventListener("click", () => post("/api/demo", {}));
+$("approve").addEventListener("click", () => { if (planId) post("/api/plans/" + planId + "/approve", {}); });
+$("deny").addEventListener("click", () => { if (planId) post("/api/plans/" + planId + "/deny", {}); });
+$("run-form").addEventListener("submit", (event) => {
   event.preventDefault();
   const source = new FormData(event.target).get("source");
   if (source) post("/api/runs", {source});

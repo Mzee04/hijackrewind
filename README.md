@@ -63,7 +63,7 @@ That publishes the same stub on port 8088 and Mailpit on http://127.0.0.1:8025. 
 3. For email, verify the DKIM signature. Sandbox mode uses the bundled test key and does not query DNS. Live mode queries DNS. `Authentication-Results: dkim=pass` without a signature that verifies is not enough. The signing domain must align with From and be allowlisted (default `github.com`). Lookalikes such as `github.com.evil.test` are quarantined.
 4. Extract a concrete object (key id, email, hook id, and so on) and compare it with the live API or the stub.
 5. If the object is missing, or it is on the known-good manifest, stop.
-6. Write a dry-run plan. In `dry-run` mode, stop there. In `sandbox` or `live`, policy may delete one verified unknown SSH key. Anything else needs `hijackrewind approve PLAN_ID`.
+6. Write a dry-run plan. In `dry-run` mode, stop there. In `sandbox` or `live`, policy may auto-run a reversible containment action: delete one unknown SSH key, delete an unknown deploy key, delete a webhook whose host is not allowlisted, or restore branch protection from the known-good document. Account email, GPG key, signing key, and collaborator deletes wait for `hijackrewind approve PLAN_ID`. OAuth grants, other personal access tokens, and web sessions are recorded as planned and not sent. `hijackrewind rewind ACTION_ID` restores a saved before-state when a reverse call exists.
 
 ## Modes and keys
 
@@ -121,11 +121,13 @@ HijackRewind does not book meetings, pay bills, approve pull requests, or edit d
 
 The optional LLM is off. If you set `HIJACKREWIND_LLM_ENABLED=true`, it may draft one explanation sentence after the decision. It cannot authorize a mutate.
 
+The policy table is in `src/hijackrewind/policy.py`. A live run against one throwaway account is described in `docs/LIVE_TEST.md`. That run has not been done here.
+
 ## Kill switch, audit log, dashboard
 
-- `hijackrewind kill` or the red **Kill switch** button sets a flag, cancels the in-flight HTTP call, and refuses later tool calls. The audit line says the run was cancelled. `hijackrewind kill --reset` clears the flag for a later run.
+- `hijackrewind kill` or the red **Kill switch** button sets a flag, cancels the in-flight HTTP call, and refuses later tool calls. The audit line `tool_cancelled` records that the call was in flight. `hijackrewind kill --reset` clears the flag for a later run.
 - `hijackrewind demo --kill` plants a key, starts the revert, and trips the switch while the stub is still holding the `DELETE`. The key is still there afterwards.
-- The audit log is append-only JSONL with a hash chain. `hijackrewind audit --verify` checks it. There is no delete API.
+- The audit log is append-only JSONL with a hash chain. `hijackrewind audit verify` checks it. There is no delete API. The dashboard shows the same verification result.
 - The dashboard polls the current step, tool calls, decision, rate-limit points, the plan, blocked outbound hosts, and the audit tail.
 
 `DELETE` counts as 5 rate-limit points and `GET` as 1, matching GitHub's documented costs. The default cap is one mutate per run.

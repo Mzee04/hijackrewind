@@ -11,13 +11,14 @@ from typing import Any
 
 import httpx
 
+from hijackrewind.actions import save_action
 from hijackrewind.claims import extract_claims
 from hijackrewind.email_auth import verify_channel
 from hijackrewind.github_client import GitHubError
 from hijackrewind.ingest import ingest_file, ingest_url
 from hijackrewind.killswitch import ToolCancelled
 from hijackrewind.models import Claim, Document, Plan, PlanStep, RunResult
-from hijackrewind.policy import authorize
+from hijackrewind.policy import UNAVAILABLE_REASONS, authorize
 from hijackrewind.runtime import Services
 
 
@@ -257,51 +258,57 @@ async def _execute(
     allow_auto: bool,
     approved: bool,
 ) -> RunResult:
-    if len(plan.steps) > max(services.settings.mutate_cap - services.meter.mutates, 0):
-        decisions = [(False, "plan has more deletes than the per-run mutate cap")] * len(plan.steps)
-    else:
-        decisions = [
-            authorize(
-                step,
-                services.settings,
-                services.manifest,
-                services.meter,
-                allow_auto=allow_auto,
-                approved=approved,
-            )
-            for step in plan.steps
-        ]
-    if not all(ok for ok, _reason in decisions):
-        reason = next(reason for ok, reason in decisions if not ok)
-        if "dry-run" in reason:
-            plan.status = "dry_run"
-            status = "dry_run"
-            summary = f"Dry-run plan {plan.id}. {plan.blast_radius} Nothing was changed."
-        elif "approval" in reason:
-            plan.status = "pending_approval"
-            status = "pending_approval"
-            summary = f"Plan {plan.id} is waiting for approval. {plan.blast_radius}"
-        else:
-            plan.status = "blocked"
-            status = "held"
-            summary = f"Plan {plan.id} was not executed. {reason}"
+    del document
+    if plan.status == "executed":
+        summary = f"Plan {plan.id} already ran. No second mutate."
+        trace.event(step="policy", decision="idempotent skip", outcome="executed", request={"plan_id": plan.id})
+        return _finish(services, trace, plan.run_id, "executed", summary, warnings, data_issues, blocked, plan.id, [])
+    if services.settings.mode == "dry-run":
+        plan.status = "dry_run"
         save_plan(services, plan)
+        summary = f"Dry-run plan {plan.id}. {plan.blast_radius} Nothing was changed."
         services.audit.append(
             run_id=plan.run_id,
             actor="agent",
             action="mutate_denied",
-            detail={"plan_id": plan.id, "reason": reason},
+            detail={"plan_id": plan.id, "reason": "mode is dry-run"},
         )
-        trace.event(step="policy", decision=reason, outcome=status, request={"plan_id": plan.id})
-        services.monitor.update(plan=plan.model_dump(), decision=reason)
-        return _finish(services, trace, plan.run_id, status, summary, warnings, data_issues, blocked, plan.id, [])
+        return _finish(services, trace, plan.run_id, "dry_run", summary, warnings, data_issues, blocked, plan.id, [])
 
     mutated: list[str] = []
-    services.monitor.update(step="execute", decision=decisions[0][1])
-    for step, (ok, reason) in zip(plan.steps, decisions, strict=True):
+    held: list[str] = []
+    services.monitor.update(step="execute")
+    for step in plan.steps:
         services.kill.raise_if_tripped()
+        if step.disposition == "unavailable" or step.method == "NONE":
+            services.audit.append(
+                run_id=plan.run_id,
+                actor="agent",
+                action="action_planned",
+                detail={"kind": step.kind, "status": "unavailable", "reason": step.reason},
+            )
+            trace.event(step="policy", decision=step.reason, outcome="unavailable", request={"kind": step.kind})
+            continue
+        allowed, reason = authorize(
+            step,
+            services.settings,
+            services.manifest,
+            services.meter,
+            allow_auto=allow_auto,
+            approved=approved or step.disposition == "auto",
+        )
+        if not allowed:
+            if "approval" in reason:
+                held.append(reason)
+            services.audit.append(
+                run_id=plan.run_id,
+                actor="agent",
+                action="mutate_denied",
+                detail={"plan_id": plan.id, "path": step.path, "reason": reason, "status": "held"},
+            )
+            continue
         try:
-            await services.github.delete(step.path, body=step.body)
+            outcome = await services.github.mutate(step.method, step.path, step.body)
         except ToolCancelled:
             plan.status = "cancelled"
             save_plan(services, plan)
@@ -309,34 +316,63 @@ async def _execute(
         except GitHubError as exc:
             plan.status = "blocked"
             save_plan(services, plan)
-            summary = f"API error during {step.path}. Failing closed. {exc}"
+            summary = f"API error during {step.method} {step.path}. Failing closed. {exc}"
             services.audit.append(
                 run_id=plan.run_id,
                 actor="agent",
                 action="mutate_failed",
                 detail={"path": step.path, "error": str(exc)},
             )
-            trace.event(step="execute", tool=f"DELETE {step.path}", decision="fail closed", outcome="held")
             return _finish(services, trace, plan.run_id, "held", summary, warnings, data_issues, blocked, plan.id, mutated)
-        mutated.append(step.path)
+        action_id = save_action(services, run_id=plan.run_id, plan_id=plan.id, step=step, outcome=outcome)
+        if outcome == "done":
+            mutated.append(step.path)
         services.audit.append(
             run_id=plan.run_id,
             actor="agent",
-            action="mutate_executed",
-            detail={"path": step.path, "reason": reason, "kind": step.kind},
+            action="mutate_executed" if outcome == "done" else "idempotent_noop",
+            detail={
+                "path": step.path,
+                "method": step.method,
+                "reason": reason,
+                "kind": step.kind,
+                "action_id": action_id,
+                "status": "auto" if step.disposition == "auto" else "approved",
+                "before": step.before or {},
+                "after": {"outcome": outcome},
+            },
         )
         trace.event(
             step="execute",
-            tool=f"DELETE {step.path}",
+            tool=f"{step.method} {step.path}",
             decision=reason,
-            outcome="executed",
-            request={"path": step.path},
+            outcome=outcome,
+            request={"path": step.path, "action_id": action_id},
         )
-    plan.status = "executed"
+    unavailable = [step for step in plan.steps if step.disposition == "unavailable"]
+    if held and mutated:
+        plan.status = "pending_approval"
+        status = "pending_approval"
+        summary = f"Plan {plan.id} ran the reversible steps and is waiting on the rest. {plan.blast_radius}"
+    elif held:
+        plan.status = "pending_approval"
+        status = "pending_approval"
+        summary = f"Plan {plan.id} is waiting for approval. {plan.blast_radius}"
+    elif mutated:
+        plan.status = "executed"
+        status = "executed"
+        summary = f"Executed plan {plan.id}. {plan.blast_radius}"
+    elif unavailable:
+        plan.status = "blocked"
+        status = "held"
+        summary = "Planned containment that this token cannot perform. " + unavailable[0].reason
+    else:
+        plan.status = "blocked"
+        status = "held"
+        summary = f"Plan {plan.id} was not executed."
     save_plan(services, plan)
-    services.monitor.update(plan=plan.model_dump())
-    summary = f"Executed plan {plan.id}. {plan.blast_radius}"
-    return _finish(services, trace, plan.run_id, "executed", summary, warnings, data_issues, blocked, plan.id, mutated)
+    services.monitor.update(plan=plan.model_dump(), decision=summary)
+    return _finish(services, trace, plan.run_id, status, summary, warnings, data_issues, blocked, plan.id, mutated)
 
 
 async def _cross_check(claims: list[Claim], services: Services) -> tuple[list[PlanStep], list[str]]:
@@ -346,6 +382,18 @@ async def _cross_check(claims: list[Claim], services: Services) -> tuple[list[Pl
     repo = services.settings.test_repo_name
     for claim in claims:
         services.kill.raise_if_tripped()
+        if claim.kind in UNAVAILABLE_REASONS:
+            steps.append(
+                PlanStep(
+                    kind=claim.kind,
+                    method="NONE",
+                    path="",
+                    object_id=claim.object_id or "unspecified",
+                    reason=UNAVAILABLE_REASONS[claim.kind],
+                    disposition="unavailable",
+                )
+            )
+            continue
         if claim.kind == "ssh_key":
             keys = await services.github.get_json("/user/keys") or []
             match = _match_key(keys, claim)
@@ -362,6 +410,11 @@ async def _cross_check(claims: list[Claim], services: Services) -> tuple[list[Pl
                     path=f"/user/keys/{match['id']}",
                     object_id=str(match["id"]),
                     reason=f"unknown SSH key {match['id']} ({match.get('title') or 'untitled'})",
+                    disposition="auto",
+                    before=match,
+                    reverse_method="POST",
+                    reverse_path="/user/keys",
+                    reverse_body={"title": match.get("title") or "restored", "key": match.get("key") or ""},
                 )
             )
         elif claim.kind == "email" and claim.email:
@@ -425,6 +478,15 @@ async def _cross_check(claims: list[Claim], services: Services) -> tuple[list[Pl
                     owner=owner,
                     repo=repo,
                     reason=f"unknown deploy key {match['id']}",
+                    disposition="auto",
+                    before=match,
+                    reverse_method="POST",
+                    reverse_path=f"/repos/{owner}/{repo}/keys",
+                    reverse_body={
+                        "title": match.get("title") or "restored",
+                        "key": match.get("key") or "",
+                        "read_only": bool(match.get("read_only", True)),
+                    },
                 )
             )
         elif claim.kind == "webhook" and claim.object_id:
@@ -436,6 +498,10 @@ async def _cross_check(claims: list[Claim], services: Services) -> tuple[list[Pl
             if services.manifest.id_known(services.manifest.repo(owner, repo).webhooks, str(match["id"])):
                 notes.append(f"Webhook {match['id']} is on the known-good manifest.")
                 continue
+            from urllib.parse import urlparse
+
+            host = (urlparse((match.get("config") or {}).get("url", "")).hostname or "").lower()
+            unknown_host = host not in services.settings.webhook_hosts()
             steps.append(
                 PlanStep(
                     kind="webhook",
@@ -444,7 +510,16 @@ async def _cross_check(claims: list[Claim], services: Services) -> tuple[list[Pl
                     object_id=str(match["id"]),
                     owner=owner,
                     repo=repo,
-                    reason=f"unknown webhook {match['id']}",
+                    reason=f"webhook {match['id']} points at {host or 'an unknown host'}",
+                    disposition="auto" if unknown_host else "approval",
+                    before=match,
+                    reverse_method="POST",
+                    reverse_path=f"/repos/{owner}/{repo}/hooks",
+                    reverse_body={
+                        "config": match.get("config") or {},
+                        "events": match.get("events") or ["push"],
+                        "active": bool(match.get("active", True)),
+                    },
                 )
             )
         elif claim.kind == "collaborator" and claim.login:
@@ -472,8 +547,27 @@ async def _cross_check(claims: list[Claim], services: Services) -> tuple[list[Pl
             protection = await services.github.get_json(
                 f"/repos/{owner}/{repo}/branches/{claim.branch}/protection"
             )
-            if not protection:
-                notes.append(f"Branch {claim.branch} has no live protection to remove.")
+            saved = services.manifest.repo(owner, repo).protections.get(claim.branch)
+            if claim.change == "removed" or not protection:
+                if not saved:
+                    notes.append(
+                        f"Branch {claim.branch} has no saved protection document, so it cannot be restored."
+                    )
+                    continue
+                steps.append(
+                    PlanStep(
+                        kind="branch_protection",
+                        method="PUT",
+                        path=f"/repos/{owner}/{repo}/branches/{claim.branch}/protection",
+                        object_id=claim.branch,
+                        owner=owner,
+                        repo=repo,
+                        reason=f"restore known-good protection on {claim.branch}",
+                        disposition="auto",
+                        before=protection or {},
+                        body=saved,
+                    )
+                )
                 continue
             if claim.branch in services.manifest.repo(owner, repo).protected_branches:
                 notes.append(f"Protection on {claim.branch} is on the known-good manifest.")
@@ -487,6 +581,8 @@ async def _cross_check(claims: list[Claim], services: Services) -> tuple[list[Pl
                     owner=owner,
                     repo=repo,
                     reason=f"unknown branch protection on {claim.branch}",
+                    disposition="approval",
+                    before=protection,
                 )
             )
         else:
@@ -505,8 +601,8 @@ def _match_key(keys: list[dict], claim: Claim) -> dict | None:
 
 
 def _blast(steps: list[PlanStep]) -> str:
-    bits = [step.reason for step in steps]
-    return "Deletes " + "; ".join(bits) + ". Does not lock the account or touch known-good objects."
+    bits = [step.reason for step in steps] or ["no steps"]
+    return "Plans " + "; ".join(bits) + ". Known-good objects stay. Destructive steps wait for approval."
 
 
 def _triage_summary(document: Document, reason: str, warnings: list[str], data_issues: list[str], blocked: list[dict]) -> str:

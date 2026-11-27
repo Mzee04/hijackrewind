@@ -17,7 +17,12 @@ class Claim(BaseModel):
         "webhook",
         "collaborator",
         "branch_protection",
+        "oauth_grant",
+        "pat",
+        "session",
+        "repo_delete",
     ]
+    change: str = ""
     object_id: str | None = None
     title: str | None = None
     fingerprint: str | None = None
@@ -69,7 +74,7 @@ class Document(BaseModel):
 
 class PlanStep(BaseModel):
     kind: str
-    method: Literal["DELETE"]
+    method: Literal["DELETE", "PUT", "POST", "NONE"]
     path: str
     object_id: str
     reason: str
@@ -77,6 +82,11 @@ class PlanStep(BaseModel):
     repo: str = ""
     primary: bool = False
     body: dict | None = None
+    disposition: Literal["auto", "approval", "unavailable"] = "approval"
+    before: dict | None = None
+    reverse_method: Literal["DELETE", "PUT", "POST"] | None = None
+    reverse_path: str | None = None
+    reverse_body: dict | None = None
 
 
 class Plan(BaseModel):
