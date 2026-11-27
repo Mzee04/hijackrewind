@@ -54,7 +54,7 @@ def create_dashboard(settings: Settings | None = None, services: Services | None
 
     @app.get("/api/audit")
     async def audit() -> dict:
-        events = current().audit.read_all()[-12:]
+        events = current().audit.read_all()[-40:]
         ok, detail = current().audit.verify()
         return {"ok": ok, "detail": detail, "events": events}
 
