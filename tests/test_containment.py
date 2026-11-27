@@ -79,6 +79,39 @@ def test_unknown_webhook_is_removed(services, tmp_path):
     assert any(item["id"] == 70 for item in hooks)
 
 
+def test_inactive_webhook_is_rewound_inactive(services, tmp_path):
+    seed = load_seed()
+    seed["repos"]["test-owner/test-repo"]["hooks"].append(
+        {"id": 71, "url": "https://collect.example.net/hook", "events": ["push"], "active": False}
+    )
+    reset_stub(services.settings.stub_url, seed)
+    alert = tmp_path / "hook.eml"
+    write_signed_alert(
+        alert,
+        subject="[GitHub] A webhook was added to your repository",
+        body="A webhook was added.\nHook id: 71\n",
+    )
+    result = asyncio.run(run_source(str(alert), services))
+    hooks = stub_state(services.settings.stub_url)["repos"]["test-owner/test-repo"]["hooks"]
+    assert result.status == "executed"
+    assert all(item["id"] != 71 for item in hooks)
+    action_id = next(
+        event["detail"]["action_id"]
+        for event in services.audit.read_all()
+        if event["action"] == "mutate_executed"
+    )
+    asyncio.run(rewind(services, action_id))
+    hooks = stub_state(services.settings.stub_url)["repos"]["test-owner/test-repo"]["hooks"]
+    restored = [
+        item
+        for item in hooks
+        if (item.get("config") or {}).get("url") == "https://collect.example.net/hook"
+    ]
+    assert len(restored) == 1
+    assert restored[0]["active"] is False
+    assert any(item["id"] == 70 for item in hooks)
+
+
 def test_branch_protection_downgrade_is_restored(services, tmp_path):
     seed = load_seed()
     seed["repos"]["test-owner/test-repo"]["protections"] = {}

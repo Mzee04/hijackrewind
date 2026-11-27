@@ -515,7 +515,11 @@ async def _cross_check(claims: list[Claim], services: Services) -> tuple[list[Pl
                     before=match,
                     reverse_method="POST",
                     reverse_path=f"/repos/{owner}/{repo}/hooks",
-                    reverse_body={"config": match.get("config") or {}, "events": match.get("events") or ["push"]},
+                    reverse_body={
+                        "config": match.get("config") or {},
+                        "events": match.get("events") or ["push"],
+                        "active": bool(match.get("active", True)),
+                    },
                 )
             )
         elif claim.kind == "collaborator" and claim.login:

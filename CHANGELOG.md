@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Webhook rewind now restores the saved `active` flag, so an inactive hook is not brought back as active.
 - Reversible containment can run without a click: unknown SSH keys, unknown deploy keys, webhooks on a host that is not allowlisted, and a branch-protection restore from the known-good document. `hijackrewind rewind ACTION_ID` puts the saved before-state back when the API allows it.
 - OAuth grant revocation, other personal access tokens, and web sessions are planned and not sent. A user token has no endpoint for them. Repository deletion is refused.
 - GET retries 5xx and rate limits with backoff and jitter. Timeouts stop a slow call. An in-flight DELETE cancelled by the kill switch is an audit event `tool_cancelled`.

@@ -70,7 +70,7 @@ def _hook(item: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": int(item["id"]),
         "name": "web",
-        "active": True,
+        "active": bool(item.get("active", True)),
         "events": item.get("events", ["push"]),
         "config": item.get("config") or {"url": item.get("url", ""), "content_type": "json"},
     }
@@ -306,7 +306,7 @@ def create_stub() -> FastAPI:
     async def create_hook(owner: str, repo: str, payload: dict) -> JSONResponse:
         store = _repo(box(), owner, repo)["hooks"]
         new_id = int(payload.get("id") or (max(store) + 1 if store else 1))
-        item = _hook({"id": new_id, "events": payload.get("events", ["push"]), "config": payload.get("config") or {}})
+        item = _hook({"id": new_id, "events": payload.get("events", ["push"]), "config": payload.get("config") or {}, "active": payload.get("active", True)})
         store[new_id] = item
         box().mutations.append({"kind": "webhook_restore", "id": new_id})
         return JSONResponse(item, status_code=201, headers=rate_headers())
