@@ -6,6 +6,25 @@ This is the account owner's automation. It does not impersonate GitHub staff or 
 
 Author: Toyyib Olamilekan Muhammed (GitHub `Mzee04`). Track: open (`.agentware.toml`).
 
+## Architecture
+
+```mermaid
+flowchart TD
+  ingest[Ingest file or local page] --> screen[Screen untrusted content]
+  screen --> egress[Block lure hosts]
+  egress --> dkim[Verify DKIM signature]
+  dkim -->|no signature or bad signature| stop[Hold or quarantine]
+  dkim -->|verified and allowlisted| claim[Extract one concrete object]
+  claim --> api[Cross-check stub or GitHub API]
+  api --> plan[Write a dry-run plan]
+  plan --> policy{Policy in code}
+  policy -->|dry-run| stop
+  policy -->|one unknown SSH key| delete[DELETE that key]
+  policy -->|anything else| approve[Wait for audited approval]
+```
+
+The CLI and the dashboard call the same pipeline. `policy.py` is the only place a mutate is allowed.
+
 ## 15-minute sandbox
 
 You need Python 3.11 or newer. Docker is optional. No GitHub token is required.
@@ -19,7 +38,7 @@ python3 -m pytest
 python3 -m hijackrewind trap-pack
 ```
 
-`demo` starts the GitHub-shaped stub if nothing is already listening, plants a known-good SSH key and one unknown key, feeds a fixture alert, and deletes only the unknown key.
+`demo` starts the GitHub-shaped stub if nothing is already listening, plants a known-good SSH key and one unknown key, feeds a signed fixture alert, and deletes only the unknown key. That sequence, including pytest, was run from a fresh dependency install with no token.
 
 The dashboard is the live view, the approval buttons, and the kill switch:
 
@@ -73,6 +92,8 @@ For live mode the token is only that dedicated test account:
 - One test repo, set `TEST_REPO_OWNER` and `TEST_REPO_NAME`: deploy keys, webhooks, collaborators, branch protection
 
 Repo calls are refused unless the owner and name match that pair. Tokens stay in the environment. `.env` is gitignored. `.env.example` has placeholders only.
+
+See `CHANGELOG.md` for what changed after the first sandbox cut.
 
 ## Honest limits
 
