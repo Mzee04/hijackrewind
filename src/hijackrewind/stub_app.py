@@ -283,6 +283,38 @@ def create_stub() -> FastAPI:
             return JSONResponse({"message": "Not Found"}, status_code=404, headers=rate_headers())
         return JSONResponse(protection, headers=rate_headers())
 
+    @app.post("/user/keys")
+    async def create_key(payload: dict) -> JSONResponse:
+        new_id = int(payload.get("id") or (max(box().ssh_keys) + 1 if box().ssh_keys else 1))
+        item = _ssh({"id": new_id, "title": payload.get("title", ""), "key": payload.get("key", "")})
+        box().ssh_keys[new_id] = item
+        box().mutations.append({"kind": "ssh_key_restore", "id": new_id})
+        return JSONResponse(item, status_code=201, headers=rate_headers())
+
+    @app.post("/repos/{owner}/{repo}/keys")
+    async def create_deploy(owner: str, repo: str, payload: dict) -> JSONResponse:
+        store = _repo(box(), owner, repo)["deploy_keys"]
+        new_id = int(payload.get("id") or (max(store) + 1 if store else 1))
+        item = _ssh({"id": new_id, "title": payload.get("title", ""), "key": payload.get("key", ""), "read_only": payload.get("read_only", True)})
+        store[new_id] = item
+        box().mutations.append({"kind": "deploy_key_restore", "id": new_id})
+        return JSONResponse(item, status_code=201, headers=rate_headers())
+
+    @app.post("/repos/{owner}/{repo}/hooks")
+    async def create_hook(owner: str, repo: str, payload: dict) -> JSONResponse:
+        store = _repo(box(), owner, repo)["hooks"]
+        new_id = int(payload.get("id") or (max(store) + 1 if store else 1))
+        item = _hook({"id": new_id, "events": payload.get("events", ["push"]), "config": payload.get("config") or {}})
+        store[new_id] = item
+        box().mutations.append({"kind": "webhook_restore", "id": new_id})
+        return JSONResponse(item, status_code=201, headers=rate_headers())
+
+    @app.put("/repos/{owner}/{repo}/branches/{branch}/protection")
+    async def put_protection(owner: str, repo: str, branch: str, payload: dict) -> JSONResponse:
+        _repo(box(), owner, repo)["protections"][branch] = payload
+        box().mutations.append({"kind": "branch_protection_restore", "id": branch})
+        return JSONResponse(payload, headers=rate_headers())
+
     @app.delete("/repos/{owner}/{repo}/branches/{branch}/protection")
     async def delete_protection(owner: str, repo: str, branch: str, request: Request) -> Response:
         aborted = await wait_or_abort(request, "branch_protection", branch)

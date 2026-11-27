@@ -15,7 +15,7 @@ _TITLE = re.compile(r"\b(?:key\s+)?title\s*:\s*([A-Za-z0-9_ .:/-]{1,80})", re.I)
 _EMAIL = re.compile(r"\b([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})\b")
 _HOOK_ID = re.compile(r"\bhook\s*id\s*[:#]?\s*(\d{1,12})\b", re.I)
 _LOGIN = re.compile(r"\bcollaborator\s+([A-Za-z0-9](?:[A-Za-z0-9-]{0,37}))\b", re.I)
-_BRANCH = re.compile(r"\bbranch\s+([A-Za-z0-9._/-]{1,80})\b", re.I)
+_BRANCH = re.compile(r"\bbranch\s+(?!protection\b)([A-Za-z0-9._/-]{1,80})", re.I)
 
 
 def extract_claims(visible_text: str) -> list[Claim]:
@@ -60,7 +60,17 @@ def extract_claims(visible_text: str) -> list[Claim]:
 
     if "branch protection" in lowered:
         branch = _BRANCH.search(text)
-        if branch and re.search(r"\b(added|enabled|removed|disabled|changed)\b", lowered):
-            claims.append(Claim(kind="branch_protection", branch=branch.group(1)))
+        if branch and re.search(r"\b(added|enabled|removed|disabled|changed|downgrad)\b", lowered):
+            change = "removed" if re.search(r"removed|disabled|downgrad", lowered) else "added"
+            claims.append(Claim(kind="branch_protection", branch=branch.group(1).strip(".,;:"), change=change))
+
+    if re.search(r"oauth (?:app )?grant|authorized oauth", lowered):
+        claims.append(Claim(kind="oauth_grant", object_id="unspecified"))
+    if re.search(r"personal access token", lowered):
+        claims.append(Claim(kind="pat", object_id="unspecified"))
+    if re.search(r"web session", lowered):
+        claims.append(Claim(kind="session", object_id="unspecified"))
+    if re.search(r"delete the repository|repository was deleted", lowered):
+        claims.append(Claim(kind="repo_delete", object_id="unspecified"))
 
     return claims

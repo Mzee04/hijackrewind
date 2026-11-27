@@ -31,8 +31,23 @@ def ingest_file(path: Path) -> Document:
     if not path.is_file():
         raise IngestError(f"no such file: {path}")
     data = path.read_bytes()
+    if len(data) > 2_000_000:
+        data = data[:2_000_000]
     if path.suffix.lower() == ".eml" or _looks_like_email(data):
-        return document_from_email(data, source=str(path))
+        try:
+            return document_from_email(data, source=str(path))
+        except Exception:
+            screened = screen_text(modality="email", raw_text="")
+            screened.data_issues.append("malformed email")
+            screened.warnings.append("broken_data")
+            return Document(
+                source=str(path),
+                modality="email",
+                visible_text="",
+                raw_text="",
+                raw_bytes=data[:200_000],
+                screen=screened,
+            )
     text, encoding_notes = decode_bytes(data)
     modality = _modality(path, text)
     html = text if modality == "html" else ""
@@ -103,7 +118,7 @@ def document_from_email(data: bytes, source: str) -> Document:
         modality="email",
         visible_text=screened.visible_text,
         raw_text=raw,
-        subject=str(message.get("subject", "")),
+        subject=str(message.get("subject", ""))[:300],
         from_name=name,
         from_address=address,
         from_domain=domain,

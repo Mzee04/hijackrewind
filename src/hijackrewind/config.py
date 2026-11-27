@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     max_retry_wait: float = Field(default=2.0, validation_alias="HIJACKREWIND_MAX_RETRY_WAIT")
     dkim_dns: str = Field(default="", validation_alias="HIJACKREWIND_DKIM_DNS")
     test_github_login: str = Field(default="", validation_alias="TEST_GITHUB_LOGIN")
+    request_timeout: float = Field(default=30.0, validation_alias="HIJACKREWIND_REQUEST_TIMEOUT")
+    webhook_host_allowlist: str = Field(default="", validation_alias="HIJACKREWIND_WEBHOOK_HOST_ALLOWLIST")
+
+    def webhook_hosts(self) -> set[str]:
+        return {part.strip().lower() for part in self.webhook_host_allowlist.split(",") if part.strip()}
 
     def dkim_mode(self) -> str:
         choice = self.dkim_dns.strip().lower()

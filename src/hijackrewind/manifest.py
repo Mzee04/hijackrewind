@@ -13,6 +13,7 @@ class RepoManifest(BaseModel):
     webhooks: list[dict] = Field(default_factory=list)
     collaborators: list[str] = Field(default_factory=list)
     protected_branches: list[str] = Field(default_factory=list)
+    protections: dict[str, dict] = Field(default_factory=dict)
 
 
 class Manifest(BaseModel):

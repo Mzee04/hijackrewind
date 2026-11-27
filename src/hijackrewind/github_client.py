@@ -7,6 +7,7 @@ all live here. A DELETE that loses the race is cancelled, not completed.
 from __future__ import annotations
 
 import asyncio
+import random
 from typing import Any
 
 import httpx
@@ -68,13 +69,22 @@ class GitHubClient:
             return None
         return response.json()
 
-    async def delete(self, path: str, body: dict | None = None) -> None:
-        if not self.meter.can_mutate():
-            raise MutateCapExceeded("per-run mutate cap reached")
-        self.meter.mark_mutate()
-        response = await self._request("DELETE", path, mutate=True, json_body=body)
-        if response.status_code not in {200, 204, 404}:
-            raise GitHubError(f"delete failed with HTTP {response.status_code}", response.status_code)
+    async def delete(self, path: str, body: dict | None = None) -> str:
+        return await self.mutate("DELETE", path, body)
+
+    async def mutate(self, method: str, path: str, body: dict | None = None, *, count_cap: bool = True) -> str:
+        if method not in {"DELETE", "PUT", "POST"}:
+            raise GitHubError(f"{method} is not a mutate this client will send")
+        if count_cap:
+            if not self.meter.can_mutate():
+                raise MutateCapExceeded("per-run mutate cap reached")
+            self.meter.mark_mutate()
+        response = await self._request(method, path, mutate=True, json_body=body)
+        if method == "DELETE" and response.status_code == 404:
+            return "absent"
+        if response.status_code not in {200, 201, 204}:
+            raise GitHubError(f"{method} failed with HTTP {response.status_code}", response.status_code)
+        return "done"
 
     async def _request(
         self,
@@ -98,41 +108,52 @@ class GitHubClient:
             headers["Authorization"] = f"Bearer {self.settings.github_token}"
         if mutate and self.settings.uses_stub() and self.settings.delete_delay > 0:
             headers["X-HijackRewind-Delay"] = str(self.settings.delete_delay)
-        try:
-            response = await self._send(method, url, headers=headers, json_body=json_body)
-        except ToolCancelled:
+        attempt = 0
+        while True:
+            try:
+                response = await self._send(method, url, headers=headers, json_body=json_body)
+            except ToolCancelled:
+                if self.monitor:
+                    self.monitor.tool(f"{method} {path}", "cancelled")
+                self.egress.audit.append(
+                    run_id=self.egress.run_id,
+                    actor="kill_switch",
+                    action="tool_cancelled",
+                    detail={"method": method, "path": path, "state": "in_flight"},
+                )
+                raise
+            self._read_rate(response)
+            self.meter.charge(method)
             if self.monitor:
-                self.monitor.tool(f"{method} {path}", "cancelled")
-            raise
-        self._read_rate(response)
-        self.meter.charge(method)
-        if self.monitor:
-            self.monitor.cost_points = self.meter.points
-            self.monitor.tool(f"{method} {path}", str(response.status_code))
-        if response.status_code == 401:
-            raise GitHubError("GitHub rejected the token", 401)
-        if response.status_code in {403, 429, 502, 503} and not mutate and not _retried:
-            waited = await self._maybe_wait(response)
-            if waited:
-                return await self._request(method, path, mutate=False, _retried=True)
-            raise GitHubError("GitHub rate limit or upstream error; failing closed", response.status_code)
-        if response.status_code >= 400 and response.status_code != 404:
-            raise GitHubError(f"HTTP {response.status_code} from the API", response.status_code)
-        return response
+                self.monitor.cost_points = self.meter.points
+                self.monitor.tool(f"{method} {path}", str(response.status_code))
+            if response.status_code == 401:
+                raise GitHubError("GitHub rejected the token", 401)
+            retryable = response.status_code in {429, 500, 502, 503}
+            if retryable and not mutate and attempt < 2 and not _retried:
+                delay = self._retry_delay(response, attempt)
+                if delay is None:
+                    raise GitHubError("GitHub rate limit or upstream error; failing closed", response.status_code)
+                await asyncio.sleep(delay)
+                self.kill.raise_if_tripped()
+                attempt += 1
+                continue
+            if response.status_code >= 400 and response.status_code != 404:
+                raise GitHubError(f"HTTP {response.status_code} from the API", response.status_code)
+            return response
 
-    async def _maybe_wait(self, response: httpx.Response) -> bool:
+    def _retry_delay(self, response: httpx.Response, attempt: int) -> float | None:
         header = response.headers.get("retry-after")
-        if header is None:
-            return False
-        try:
-            delay = float(header)
-        except ValueError:
-            return False
+        if header is not None:
+            try:
+                delay = float(header)
+            except ValueError:
+                return None
+        else:
+            delay = 0.05 * (2**attempt) + random.uniform(0, 0.02)
         if delay < 0 or delay > self.settings.max_retry_wait:
-            return False
-        await asyncio.sleep(delay)
-        self.kill.raise_if_tripped()
-        return True
+            return None
+        return delay
 
     def _read_rate(self, response: httpx.Response) -> None:
         remaining = response.headers.get("x-ratelimit-remaining")
@@ -141,7 +162,7 @@ class GitHubClient:
 
     async def _send(self, method: str, url: str, *, headers: dict[str, str], json_body: dict | None) -> httpx.Response:
         self.kill.raise_if_tripped()
-        timeout = httpx.Timeout(30.0, connect=5.0)
+        timeout = httpx.Timeout(self.settings.request_timeout, connect=min(5.0, self.settings.request_timeout))
         client = httpx.AsyncClient(timeout=timeout, follow_redirects=False)
         try:
             send_task = asyncio.create_task(client.request(method, url, headers=headers, json=json_body))

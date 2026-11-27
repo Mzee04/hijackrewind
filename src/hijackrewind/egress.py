@@ -37,6 +37,10 @@ _ALLOWED_PATHS: list[tuple[str, re.Pattern[str]]] = [
     ("DELETE", re.compile(r"^/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/collaborators/[A-Za-z0-9-]{1,39}$")),
     ("GET", re.compile(r"^/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/branches/[^/]+/protection$")),
     ("DELETE", re.compile(r"^/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/branches/[^/]+/protection$")),
+    ("PUT", re.compile(r"^/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/branches/[^/]+/protection$")),
+    ("POST", re.compile(r"^/user/keys$")),
+    ("POST", re.compile(r"^/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/keys$")),
+    ("POST", re.compile(r"^/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/hooks$")),
     ("GET", re.compile(r"^/health$")),
 ]
 

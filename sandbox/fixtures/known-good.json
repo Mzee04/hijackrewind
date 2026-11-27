@@ -14,7 +14,15 @@
       "deploy_keys": [{"id": 50}],
       "webhooks": [{"id": 70}],
       "collaborators": ["owner"],
-      "protected_branches": ["main"]
+      "protected_branches": ["main"],
+      "protections": {
+        "main": {
+          "required_status_checks": null,
+          "enforce_admins": false,
+          "required_pull_request_reviews": {"required_approving_review_count": 1},
+          "restrictions": null
+        }
+      }
     }
   }
 }
