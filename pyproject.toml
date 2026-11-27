@@ -1,0 +1,36 @@
+[project]
+name = "hijackrewind"
+version = "1.0.0"
+description = "Verify GitHub account-security alerts and surgically revert unauthorized changes."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Toyyib Olamilekan Muhammed" }]
+dependencies = [
+  "httpx==0.29.0",
+  "pydantic==2.14.4",
+  "pydantic-settings==2.16.3",
+  "fastapi==0.165.0",
+  "uvicorn==0.54.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.2.0"]
+
+[project.scripts]
+hijackrewind = "hijackrewind.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+hijackrewind = ["dashboard.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["src"]
