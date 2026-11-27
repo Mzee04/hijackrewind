@@ -105,7 +105,9 @@ def create_stub() -> FastAPI:
         pending = box().fail_next
         if not pending or pending.get("path") != path:
             return None
-        box().fail_next = None
+        pending["times"] = int(pending.get("times", 1)) - 1
+        if pending["times"] <= 0:
+            box().fail_next = None
         headers = rate_headers()
         if pending.get("retry_after") is not None:
             headers["Retry-After"] = str(pending["retry_after"])
