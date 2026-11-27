@@ -15,10 +15,10 @@ The code was written with an AI coding assistant during the hackathon window. Th
 | `screen.py` | Untrusted-content screen: hidden HTML, base64 instructions, zero-width characters, broken tables, CSV, JSON, and calendars. |
 | `email_auth.py` | DKIM signature verification, alignment, and lookalike domains. |
 | `claims.py` | Regex extraction of a concrete object. No raw document text is copied into a URL. |
-| `policy.py` | The only place a mutate is authorized. |
-| `github_client.py` | One HTTP client: timeouts, kill-switch race, rate-limit wait, path allowlist. |
+| `policy.py` | The only grant for execute and rewind. It ignores `PlanStep.disposition`. |
+| `github_client.py` | One HTTP client: dry-run block, timeouts, kill-switch race, rate-limit cost, path allowlist. |
 | `stub_app.py` | Local list/delete API shaped like the GitHub routes we support. |
-| `audit.py` | Append-only hash chain. |
+| `audit.py` | Tamper-evident hash chain with a checkpoint of the latest hash. |
 | `dashboard.py` | Local page for the live view, approvals, and the kill switch. |
 | `trap_harness.py` | Runs `official-trap-pack/traps/` and writes `tests/trap-pack/RESULTS.md`. |
 
@@ -26,7 +26,7 @@ The code was written with an AI coding assistant during the hackathon window. Th
 
 `ingest → screen → egress blocks → verify channel → extract claims → cross-check API → plan → policy → maybe execute`
 
-A channel that is not an aligned allowlisted email cannot create a plan. A plan in `dry-run` mode is not executed. A plan with more steps than `HIJACKREWIND_MUTATE_CAP` (default 1) is not executed. Auto-execute is only the case of exactly one unknown SSH key when `HIJACKREWIND_AUTO_EXECUTE_SSH_KEY=true`.
+A channel that is not an aligned allowlisted email cannot create a plan. Dry-run never sends a mutation. Auto-execute requires a confirmed match and the flag for that kind. `HIJACKREWIND_AUTO_EXECUTE_SSH_KEY` defaults to false. `HIJACKREWIND_AUTO_EXECUTE_CONTAINMENT` defaults to false and covers a confirmed deploy-key delete, an unknown-host webhook delete, and a known-good branch-protection restore. The per-run execute cap is `HIJACKREWIND_MUTATE_CAP` (default 1). Rewind does not spend it.
 
 ## Tools the agent can call
 

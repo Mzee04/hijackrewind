@@ -25,6 +25,7 @@ class Box:
         self.mutations: list[dict[str, Any]] = []
         self.aborted: list[dict[str, Any]] = []
         self.fail_next: dict[str, Any] | None = None
+        self.commit_then_stall: bool = False
 
     def reset(self, payload: dict[str, Any]) -> None:
         self.__init__()
@@ -161,6 +162,12 @@ def create_stub() -> FastAPI:
         box().fail_next = payload
         return {"ok": "true"}
 
+    @app.post("/_admin/commit-then-stall")
+    async def arm_commit_then_stall() -> dict[str, str]:
+        """Apply the next SSH-key delete, then stall so the client can time out."""
+        box().commit_then_stall = True
+        return {"ok": "true"}
+
     @app.get("/_admin/state")
     async def admin_state() -> dict[str, Any]:
         current = box()
@@ -191,6 +198,15 @@ def create_stub() -> FastAPI:
 
     @app.delete("/user/keys/{key_id}")
     async def delete_key(key_id: int, request: Request) -> Response:
+        if box().commit_then_stall:
+            box().commit_then_stall = False
+            box().ssh_keys.pop(key_id, None)
+            box().mutations.append({"kind": "ssh_key", "id": key_id})
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                raise
+            return Response(status_code=499, headers=rate_headers())
         aborted = await wait_or_abort(request, "ssh_key", str(key_id))
         if aborted:
             return aborted

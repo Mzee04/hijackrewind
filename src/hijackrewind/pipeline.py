@@ -11,14 +11,16 @@ from typing import Any
 
 import httpx
 
-from hijackrewind.actions import save_action
+from hijackrewind.actions import load_action, save_action, write_action
+from hijackrewind.config import reveal
+from hijackrewind.github_client import OutcomeUnknown
 from hijackrewind.claims import extract_claims
 from hijackrewind.email_auth import verify_channel
 from hijackrewind.github_client import GitHubError
 from hijackrewind.ingest import ingest_file, ingest_url
 from hijackrewind.killswitch import ToolCancelled
 from hijackrewind.models import Claim, Document, Plan, PlanStep, RunResult
-from hijackrewind.policy import UNAVAILABLE_REASONS, authorize
+from hijackrewind.policy import UNAVAILABLE_REASONS, authorize, classify, object_is_known
 from hijackrewind.runtime import Services
 
 
@@ -27,8 +29,14 @@ def new_id(prefix: str) -> str:
 
 
 def save_plan(services: Services, plan: Plan) -> None:
+    from datetime import datetime, timedelta, timezone
+
     directory = services.settings.plan_dir()
     directory.mkdir(parents=True, exist_ok=True)
+    if not plan.created_at:
+        now = datetime.now(timezone.utc)
+        plan.created_at = now.isoformat()
+        plan.expires_at = (now + timedelta(seconds=services.settings.plan_ttl_seconds)).isoformat()
     (directory / f"{plan.id}.json").write_text(plan.model_dump_json(indent=2), encoding="utf-8")
 
 
@@ -96,6 +104,12 @@ async def run_document(document: Document, services: Services) -> RunResult:
             services.settings.allowlisted_domains(),
             dns=services.settings.dkim_mode(),
         )
+        if channel.verified and document.raw_bytes:
+            from hijackrewind.dkim_verify import remember_message
+
+            if not remember_message(services.settings.home, document.raw_bytes):
+                channel.verified = False
+                channel.reason = "replayed message"
         trace.event(
             step="verify",
             decision="verified" if channel.verified else "rejected",
@@ -121,7 +135,10 @@ async def run_document(document: Document, services: Services) -> RunResult:
             return _finish(services, trace, run_id, "held", summary, warnings, data_issues, blocked, None, [])
 
         services.monitor.update(step="extract", decision="channel verified")
-        claims = extract_claims(screen.visible_text if screen else document.visible_text)
+        from hijackrewind.dkim_verify import claim_text
+
+        claim_source = claim_text(document.raw_bytes) if document.raw_bytes else ""
+        claims = extract_claims(claim_source or (screen.visible_text if screen else document.visible_text))
         trace.event(
             step="extract",
             decision=f"{len(claims)} claim(s)",
@@ -168,8 +185,7 @@ async def run_document(document: Document, services: Services) -> RunResult:
             outcome="draft",
             request={"plan_id": plan.id, "paths": [step.path for step in steps]},
         )
-        allow_auto = len(steps) == 1 and steps[0].kind == "ssh_key" and services.settings.auto_execute_ssh_key
-        return await _execute(services, trace, plan, document, warnings, data_issues, blocked, allow_auto=allow_auto, approved=False)
+        return await _execute(services, trace, plan, document, warnings, data_issues, blocked, allow_auto=True, approved=False)
     except ToolCancelled as exc:
         summary = f"Kill switch cancelled the run ({exc}). Pending tool calls were not finished."
         services.audit.append(run_id=run_id, actor="kill_switch", action="run_cancelled", detail={"reason": str(exc)})
@@ -181,14 +197,17 @@ async def run_document(document: Document, services: Services) -> RunResult:
         trace.event(step="api", decision="fail closed", outcome="held")
         return _finish(services, trace, run_id, "held", summary, warnings, data_issues, blocked, None, [])
     except Exception as exc:  # noqa: BLE001 - fail closed into a trace instead of a stack on the operator
-        summary = f"Stopped cleanly after {type(exc).__name__}. No further mutate."
+        from hijackrewind.redact import redact_text
+
+        redacted = redact_text(str(exc), services.settings.secret_values())
+        summary = f"Stopped cleanly after {type(exc).__name__}: {redacted}. No further mutate."
         services.audit.append(
             run_id=run_id,
             actor="agent",
             action="run_failed",
-            detail={"error": type(exc).__name__},
+            detail={"error": type(exc).__name__, "message": redacted},
         )
-        trace.event(step="error", decision=type(exc).__name__, outcome="failed")
+        trace.event(step="error", decision=redacted[:280], outcome="failed", extra={"error": type(exc).__name__})
         return _finish(
             services,
             trace,
@@ -212,20 +231,22 @@ async def execute_saved_plan(services: Services, plan_id: str, *, approved: bool
     services.reset_meter()
     services.monitor.start(run_id, f"plan {plan.id}")
     services.monitor.update(plan=plan.model_dump(), step="execute")
-    if approved:
-        plan.approved = True
-        services.audit.append(
-            run_id=run_id,
-            actor="operator",
-            action="plan_approved",
-            detail={"plan_id": plan.id},
-        )
-    else:
+    if plan.status == "denied":
+        summary = f"Denied plan {plan.id} cannot execute."
+        return _finish(services, trace, run_id, "held", summary, [], [], [], plan.id, [])
+    if not approved:
         services.audit.append(run_id=run_id, actor="operator", action="plan_denied", detail={"plan_id": plan.id})
         plan.status = "denied"
         save_plan(services, plan)
         summary = f"Denied plan {plan.id}. No mutate."
         return _finish(services, trace, run_id, "held", summary, [], [], [], plan.id, [])
+    services.audit.append(
+        run_id=run_id,
+        actor="operator",
+        action="plan_approved",
+        detail={"plan_id": plan.id},
+    )
+    plan.approved = True
     try:
         return await _execute(
             services,
@@ -246,6 +267,64 @@ async def execute_saved_plan(services: Services, plan_id: str, *, approved: bool
         return _finish(services, trace, run_id, "cancelled", summary, [], [], [], plan.id, [])
 
 
+def _plan_refusal(plan: Plan) -> str:
+    from datetime import datetime, timezone
+
+    if plan.status == "denied":
+        return "denied plans cannot execute"
+    if plan.approval_used and plan.status != "executing":
+        return "approval was already used"
+    if plan.expires_at:
+        try:
+            expiry = datetime.fromisoformat(plan.expires_at)
+        except ValueError:
+            return "plan expiry is unreadable"
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) > expiry:
+            return "plan has expired"
+    return ""
+
+
+async def _revalidate(step: PlanStep, services: Services) -> tuple[bool, str]:
+    if step.method == "PUT" and step.kind == "branch_protection":
+        saved = services.manifest.repo(step.owner, step.repo).protections.get(step.object_id)
+        if not saved or step.body != saved:
+            return False, "restore body is not the known-good document"
+        return True, ""
+    if step.method != "DELETE":
+        return True, ""
+    current = await _live_object(step, services)
+    if current is None:
+        return True, "already absent"
+    if str(current.get("id", current.get("email", ""))) != str(step.object_id) and step.kind != "email":
+        return False, "live object changed after the plan"
+    if step.kind == "webhook":
+        old = ((step.before or {}).get("config") or {}).get("url")
+        new = ((current.get("config") or {}).get("url"))
+        if old and new and old != new:
+            return False, "live object changed after the plan"
+    if object_is_known(step, services.manifest):
+        return False, "object is on the known-good manifest"
+    return True, ""
+
+
+async def _live_object(step: PlanStep, services: Services) -> dict | None:
+    if step.kind == "ssh_key":
+        rows = await services.github.get_json("/user/keys") or []
+        return next((item for item in rows if str(item.get("id")) == step.object_id), None)
+    if step.kind == "deploy_key":
+        rows = await services.github.get_json(f"/repos/{step.owner}/{step.repo}/keys") or []
+        return next((item for item in rows if str(item.get("id")) == step.object_id), None)
+    if step.kind == "webhook":
+        rows = await services.github.get_json(f"/repos/{step.owner}/{step.repo}/hooks") or []
+        return next((item for item in rows if str(item.get("id")) == step.object_id), None)
+    if step.kind == "email":
+        rows = await services.github.get_json("/user/emails") or []
+        return next((item for item in rows if str(item.get("email", "")).lower() == step.object_id.lower()), None)
+    return step.before
+
+
 async def _execute(
     services: Services,
     trace: Any,
@@ -258,7 +337,49 @@ async def _execute(
     allow_auto: bool,
     approved: bool,
 ) -> RunResult:
+    from hijackrewind.runtime import execution_lock
+
+    with execution_lock(services.settings):
+        if approved:
+            current = load_plan(services, plan.id) if (services.settings.plan_dir() / f"{plan.id}.json").is_file() else plan
+            if current.status == "executed":
+                summary = f"Plan {current.id} already ran. No second mutate."
+                return _finish(services, trace, plan.run_id, "executed", summary, warnings, data_issues, blocked, plan.id, [])
+            if current.approval_used or current.status in {"executing", "denied"}:
+                summary = "approval was already used" if current.approval_used else "plan cannot be approved"
+                return _finish(services, trace, plan.run_id, "held", summary, warnings, data_issues, blocked, plan.id, [])
+            current.approval_used = True
+            current.approved = True
+            current.status = "executing"
+            save_plan(services, current)
+            plan = current
+        return await _execute_body(
+            services, trace, plan, document, warnings, data_issues, blocked, allow_auto=allow_auto, approved=approved
+        )
+
+
+async def _execute_body(
+    services: Services,
+    trace: Any,
+    plan: Plan,
+    document: Document | None,
+    warnings: list[str],
+    data_issues: list[str],
+    blocked: list[dict],
+    *,
+    allow_auto: bool,
+    approved: bool,
+) -> RunResult:
     del document
+    refusal = _plan_refusal(plan)
+    if refusal:
+        services.audit.append(
+            run_id=plan.run_id,
+            actor="agent",
+            action="mutate_denied",
+            detail={"plan_id": plan.id, "reason": refusal},
+        )
+        return _finish(services, trace, plan.run_id, "held", refusal, warnings, data_issues, blocked, plan.id, [])
     if plan.status == "executed":
         summary = f"Plan {plan.id} already ran. No second mutate."
         trace.event(step="policy", decision="idempotent skip", outcome="executed", request={"plan_id": plan.id})
@@ -295,7 +416,7 @@ async def _execute(
             services.manifest,
             services.meter,
             allow_auto=allow_auto,
-            approved=approved or step.disposition == "auto",
+            approved=approved,
         )
         if not allowed:
             if "approval" in reason:
@@ -307,8 +428,40 @@ async def _execute(
                 detail={"plan_id": plan.id, "path": step.path, "reason": reason, "status": "held"},
             )
             continue
+        fresh_ok, fresh_reason = await _revalidate(step, services)
+        if not fresh_ok:
+            held.append(fresh_reason)
+            services.audit.append(
+                run_id=plan.run_id,
+                actor="agent",
+                action="mutate_denied",
+                detail={"plan_id": plan.id, "path": step.path, "reason": fresh_reason},
+            )
+            continue
+        action_id = save_action(services, run_id=plan.run_id, plan_id=plan.id, step=step, outcome="pending")
         try:
-            outcome = await services.github.mutate(step.method, step.path, step.body)
+            outcome = await services.github.mutate(step.method, step.path, step.body, role="execute")
+        except OutcomeUnknown:
+            record = load_action(services, action_id)
+            record["status"] = "outcome_unknown"
+            record["after"] = {"outcome": "unknown"}
+            write_action(services, record)
+            plan.status = "cancelled"
+            save_plan(services, plan)
+            summary = f"Cancelled during {step.method} {step.path}. Outcome unknown. Run reconcile {action_id}."
+            services.audit.append(
+                run_id=plan.run_id,
+                actor="kill_switch",
+                action="run_cancelled",
+                detail={"reason": "cancelled, outcome unknown", "action_id": action_id},
+            )
+            services.audit.append(
+                run_id=plan.run_id,
+                actor="kill_switch",
+                action="outcome_unknown",
+                detail={"action_id": action_id, "path": step.path, "note": "cancelled, outcome unknown"},
+            )
+            return _finish(services, trace, plan.run_id, "cancelled", summary, warnings, data_issues, blocked, plan.id, mutated)
         except ToolCancelled:
             plan.status = "cancelled"
             save_plan(services, plan)
@@ -324,7 +477,10 @@ async def _execute(
                 detail={"path": step.path, "error": str(exc)},
             )
             return _finish(services, trace, plan.run_id, "held", summary, warnings, data_issues, blocked, plan.id, mutated)
-        action_id = save_action(services, run_id=plan.run_id, plan_id=plan.id, step=step, outcome=outcome)
+        record = load_action(services, action_id)
+        record["status"] = "executed" if outcome == "done" else "noop"
+        record["after"] = {"outcome": outcome, "object_id": step.object_id}
+        write_action(services, record)
         if outcome == "done":
             mutated.append(step.path)
         services.audit.append(
@@ -337,7 +493,9 @@ async def _execute(
                 "reason": reason,
                 "kind": step.kind,
                 "action_id": action_id,
-                "status": "auto" if step.disposition == "auto" else "approved",
+                "status": "auto" if reason.startswith("policy auto-execute") else "approved",
+                "classification": classify(step, services.settings, services.manifest),
+                "claim": step.object_id,
                 "before": step.before or {},
                 "after": {"outcome": outcome},
             },
@@ -409,7 +567,7 @@ async def _cross_check(claims: list[Claim], services: Services) -> tuple[list[Pl
                     method="DELETE",
                     path=f"/user/keys/{match['id']}",
                     object_id=str(match["id"]),
-                    reason=f"unknown SSH key {match['id']} ({match.get('title') or 'untitled'})",
+                    reason=f"claim ssh key {match['id']} matched live ssh key {match['id']} ({match.get('title') or 'untitled'})",
                     disposition="auto",
                     before=match,
                     reverse_method="POST",
@@ -435,9 +593,10 @@ async def _cross_check(claims: list[Claim], services: Services) -> tuple[list[Pl
                     method="DELETE",
                     path="/user/emails",
                     object_id=match["email"],
-                    reason=f"unknown account email {match['email']}",
+                    reason=f"claim {match['email']} matched live email {match['email']}",
                     primary=bool(match.get("primary")),
                     body={"emails": [match["email"]]},
+                    before=match,
                 )
             )
         elif claim.kind in {"gpg_key", "ssh_signing_key"} and claim.object_id:
@@ -477,7 +636,7 @@ async def _cross_check(claims: list[Claim], services: Services) -> tuple[list[Pl
                     object_id=str(match["id"]),
                     owner=owner,
                     repo=repo,
-                    reason=f"unknown deploy key {match['id']}",
+                    reason=f"claim deploy key {match['id']} matched live deploy key {match['id']}",
                     disposition="auto",
                     before=match,
                     reverse_method="POST",
@@ -510,7 +669,7 @@ async def _cross_check(claims: list[Claim], services: Services) -> tuple[list[Pl
                     object_id=str(match["id"]),
                     owner=owner,
                     repo=repo,
-                    reason=f"webhook {match['id']} points at {host or 'an unknown host'}",
+                    reason=f"claim webhook {match['id']} matched live webhook {match['id']} at {host or 'an unknown host'}",
                     disposition="auto" if unknown_host else "approval",
                     before=match,
                     reverse_method="POST",
@@ -601,8 +760,11 @@ def _match_key(keys: list[dict], claim: Claim) -> dict | None:
 
 
 def _blast(steps: list[PlanStep]) -> str:
-    bits = [step.reason for step in steps] or ["no steps"]
-    return "Plans " + "; ".join(bits) + ". Known-good objects stay. Destructive steps wait for approval."
+    bits = [
+        f"claim {step.kind} {step.object_id} next to live {step.kind} {step.object_id} ({step.reason})"
+        for step in steps
+    ] or ["no steps"]
+    return "Plans " + "; ".join(bits) + ". Known-good objects stay. Only a confirmed match can run."
 
 
 def _triage_summary(document: Document, reason: str, warnings: list[str], data_issues: list[str], blocked: list[dict]) -> str:
@@ -683,7 +845,7 @@ def _explain(services: Services, summary: str) -> str | None:
     try:
         response = httpx.post(
             settings.llm_base_url.rstrip("/") + "/v1/chat/completions",
-            headers={"Authorization": "Bearer [REDACTED]"} if not settings.llm_api_key else {"Authorization": f"Bearer {settings.llm_api_key}"},
+            headers={"Authorization": f"Bearer {reveal(settings.llm_api_key)}"} if reveal(settings.llm_api_key) else {},
             json={
                 "model": settings.llm_model or "local",
                 "messages": [

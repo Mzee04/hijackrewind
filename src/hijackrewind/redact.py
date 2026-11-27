@@ -13,9 +13,11 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 SECRET_RES = (
-    re.compile(r"ghp_[A-Za-z0-9]{20,}"),
+    re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}"),
     re.compile(r"github_pat_[A-Za-z0-9_]{16,}"),
     re.compile(r"sk-[A-Za-z0-9]{20,}"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"(?i)authorization\s*[:=]\s*\S+"),
     re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-]{8,}"),
     re.compile(r"(?i)(api[_-]?key|password|secret|token)\s*[:=]\s*\S+"),
 )

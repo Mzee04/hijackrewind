@@ -7,10 +7,11 @@ import uuid
 from pathlib import Path
 
 from hijackrewind.models import PlanStep
+from hijackrewind.policy import authorize_rewind
 from hijackrewind.runtime import Services
 
 
-def save_action(services: Services, *, run_id: str, plan_id: str, step: PlanStep, outcome: str) -> str:
+def save_action(services: Services, *, run_id: str, plan_id: str, step: PlanStep, outcome: str = "pending") -> str:
     action_id = "act-" + uuid.uuid4().hex[:12]
     record = {
         "id": action_id,
@@ -24,7 +25,7 @@ def save_action(services: Services, *, run_id: str, plan_id: str, step: PlanStep
         "reverse_method": step.reverse_method,
         "reverse_path": step.reverse_path,
         "reverse_body": step.reverse_body,
-        "status": "executed" if outcome == "done" else "noop",
+        "status": "pending" if outcome == "pending" else ("executed" if outcome == "done" else outcome),
     }
     directory = Path(services.settings.home) / "actions"
     directory.mkdir(parents=True, exist_ok=True)
@@ -46,19 +47,64 @@ def write_action(services: Services, record: dict) -> None:
 
 async def rewind(services: Services, action_id: str) -> dict:
     record = load_action(services, action_id)
-    if record.get("status") == "rolled_back":
+    allowed, reason = authorize_rewind(record, services.settings)
+    if record.get("status") == "rolled_back" and allowed:
         return record
-    method = record.get("reverse_method")
-    path = record.get("reverse_path")
-    if not method or not path:
-        raise ValueError("this action has no reversible API call")
-    await services.github.mutate(method, path, record.get("reverse_body"), count_cap=False)
-    record["status"] = "rolled_back"
+    if not allowed:
+        raise ValueError(reason)
+    method = record["reverse_method"]
+    path = record["reverse_path"]
+    await services.github.mutate(method, path, record.get("reverse_body"), role="rewind")
+    present = await _restored(services, record)
+    record["status"] = "rolled_back" if present else "restore_unconfirmed"
+    record["after"] = {"restored": present}
     write_action(services, record)
     services.audit.append(
         run_id=record.get("run_id") or "-",
         actor="operator",
         action="rolled_back",
-        detail={"action_id": action_id, "path": path, "method": method},
+        detail={"action_id": action_id, "path": path, "method": method, "restored": present},
+    )
+    if not present:
+        raise ValueError("rewind was sent but the restored object was not found")
+    return record
+
+
+async def reconcile(services: Services, action_id: str) -> dict:
+    record = load_action(services, action_id)
+    present = await _object_present(services, record.get("path") or "", record.get("before") or {})
+    record["reconciled"] = "present" if present else "absent"
+    if record.get("status") == "outcome_unknown":
+        record["status"] = "executed" if not present and record.get("method") == "DELETE" else "reconciled"
+    write_action(services, record)
+    services.audit.append(
+        run_id=record.get("run_id") or "-",
+        actor="operator",
+        action="reconciled",
+        detail={"action_id": action_id, "remote": record["reconciled"]},
     )
     return record
+
+
+async def _restored(services: Services, record: dict) -> bool:
+    return await _object_present(services, record.get("reverse_path") or "", record.get("reverse_body") or {})
+
+
+async def _object_present(services: Services, path: str, body: dict) -> bool:
+    if path.endswith("/keys") or path == "/user/keys":
+        rows = await services.github.get_json(path) or []
+        title = (body or {}).get("title")
+        key = (body or {}).get("key")
+        return any(item.get("title") == title or (key and item.get("key") == key) for item in rows)
+    if path.endswith("/hooks"):
+        rows = await services.github.get_json(path) or []
+        url = ((body or {}).get("config") or {}).get("url")
+        return any(((item.get("config") or {}).get("url") == url) for item in rows)
+    if "/protection" in path:
+        current = await services.github.get_json(path)
+        return current is not None
+    if path.startswith("/user/keys/"):
+        wanted = path.rsplit("/", 1)[-1]
+        rows = await services.github.get_json("/user/keys") or []
+        return any(str(item.get("id")) == wanted for item in rows)
+    return False

@@ -31,15 +31,23 @@ def ingest_file(path: Path) -> Document:
     if not path.is_file():
         raise IngestError(f"no such file: {path}")
     data = path.read_bytes()
-    if len(data) > 2_000_000:
+    truncated = False
+    original_len = len(data)
+    if original_len > 2_000_000:
         data = data[:2_000_000]
+        truncated = True
     if path.suffix.lower() == ".eml" or _looks_like_email(data):
         try:
-            return document_from_email(data, source=str(path))
+            document = document_from_email(data, source=str(path))
+            if truncated and document.screen is not None:
+                document.screen.data_issues.append(f"truncated at {original_len} bytes")
+            return document
         except Exception:
             screened = screen_text(modality="email", raw_text="")
             screened.data_issues.append("malformed email")
             screened.warnings.append("broken_data")
+            if truncated:
+                screened.data_issues.append(f"truncated at {original_len} bytes")
             return Document(
                 source=str(path),
                 modality="email",
@@ -52,6 +60,8 @@ def ingest_file(path: Path) -> Document:
     modality = _modality(path, text)
     html = text if modality == "html" else ""
     screened = screen_text(modality=modality, raw_text=text, html=html)
+    if truncated:
+        screened.data_issues.insert(0, f"truncated at {original_len} bytes")
     if encoding_notes:
         screened.data_issues = encoding_notes + screened.data_issues
         if "broken_data" not in screened.warnings:

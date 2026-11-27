@@ -128,8 +128,11 @@ def test_kill_switch_cancels_inflight_delete(settings):
 
 
 def test_dashboard_kill_and_state(settings):
+    from pydantic import SecretStr
+
+    settings.dashboard_token = SecretStr("operator-token")
     services = build_services(settings)
-    client = TestClient(create_dashboard(settings, services))
+    client = TestClient(create_dashboard(settings, services), base_url="http://127.0.0.1")
     health = client.get("/api/health")
     assert health.status_code == 200
     page = client.get("/")
@@ -137,11 +140,19 @@ def test_dashboard_kill_and_state(settings):
     assert "Kill switch" in page.text
     assert "Audit chain" in page.text
     assert "Timeline" in page.text
-    killed = client.post("/api/kill", json={"reason": "button"})
+    headers = {
+        "X-HijackRewind-Token": "operator-token",
+        "X-CSRF-Token": client.cookies.get("hijackrewind_csrf"),
+    }
+    killed = client.post("/api/kill", json={"reason": "button"}, headers=headers)
     assert killed.status_code == 200
     state = client.get("/api/state").json()
     assert state["kill"]["tripped"] is True
-    blocked = client.post("/api/runs", json={"source": "sandbox/fixtures/genuine-new-ssh-key.eml"})
+    blocked = client.post(
+        "/api/runs",
+        json={"source": "sandbox/fixtures/genuine-new-ssh-key.eml"},
+        headers=headers,
+    )
     assert blocked.status_code == 409
     audit = client.get("/api/audit").json()
     assert audit["ok"] is True

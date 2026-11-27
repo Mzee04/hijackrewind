@@ -1,8 +1,14 @@
-# Live test runbook
+# Live test
+
+CI does not call GitHub. The checks in this repository use recorded responses.
+
+A live test was run on 27 Nov 2026 against the disposable account `thelove987/hijackrewind-test`. A deploy key and a webhook were contained, rewind restored them, and the kill switch and audit verify passed. Account-wide endpoints returned 403 and failed closed with a repo-scoped token.
+
+## Runbook
 
 Use a throwaway GitHub account and one repository created for this test. Do not point HijackRewind at an account you use for anything else.
 
-Live runs are not part of CI. The checks below were written so a later run can follow them. `doctor` refuses a token whose `/user` login is not `TEST_GITHUB_LOGIN`, and it refuses a repository whose full name is not `TEST_REPO_OWNER/TEST_REPO_NAME`.
+`doctor` refuses a token whose `/user` login is not `TEST_GITHUB_LOGIN`, and it refuses a repository whose full name is not `TEST_REPO_OWNER/TEST_REPO_NAME`. `GITHUB_API_URL` must be `https://api.github.com`.
 
 ## Token
 

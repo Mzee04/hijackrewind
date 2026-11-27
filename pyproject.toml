@@ -13,8 +13,8 @@ dependencies = [
   "fastapi==0.165.0",
   "uvicorn==0.54.0",
   "dkimpy==1.1.8",
-  "dnspython==2.7.0",
-  "cryptography==44.0.2",
+  "dnspython==2.9.2",
+  "cryptography==50.0.2",
 ]
 
 [project.optional-dependencies]
