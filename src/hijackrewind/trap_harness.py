@@ -110,7 +110,7 @@ def write_results(rows: list[dict[str, str]], path: Path | None = None) -> Path:
         "# Trap Pack results",
         "",
         "Agentware 2026 Trap Pack, Hackathon Raptors (CC BY 4.0).",
-        "Each file went through the normal sandbox pipeline. The agent did not read `official-trap-pack/answers/`.",
+        "Each file went through the normal sandbox pipeline after DKIM signature checks were added. The agent did not read `official-trap-pack/answers/`.",
         "HijackRewind triages GitHub account alerts. A meeting, a bill, a checkout, or a docs issue is read and not performed. That is `held`, not a quarantine.",
         "No trap run mutated the stub. Tool-call arguments do not contain canary tokens.",
         "",
