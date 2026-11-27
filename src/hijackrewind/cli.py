@@ -12,6 +12,7 @@ from hijackrewind import __version__
 from hijackrewind.config import load_settings
 from hijackrewind.dashboard import create_dashboard
 from hijackrewind.pipeline import execute_saved_plan, run_source
+from hijackrewind.preflight import live_preflight
 from hijackrewind.runtime import (
     build_services,
     demo_alert_path,
@@ -93,7 +94,13 @@ def main(argv: list[str] | None = None) -> int:
 
 async def _run_path(path: str) -> int:
     settings = load_settings()
-    if settings.mode != "live":
+    if settings.mode == "live":
+        report = await live_preflight(settings)
+        for line in report.lines:
+            print(line)
+        if not report.ok:
+            return 2
+    else:
         ensure_stub(settings)
     services = build_services(settings)
     result = await run_source(path, services)
@@ -220,19 +227,19 @@ async def _trap_pack() -> int:
 
 def _doctor() -> int:
     settings = load_settings()
+    report = asyncio.run(live_preflight(settings))
     print(f"hijackrewind {__version__}")
-    print(f"mode: {settings.mode}")
+    for line in report.lines:
+        print(line)
     print(f"api: {settings.api_base()}")
-    print("github token:", "set" if settings.github_token else "unset")
     print(f"manifest: {settings.manifest_path}")
     print(f"sender allowlist: {', '.join(settings.allowlisted_domains())}")
     print(f"auto-execute one unknown ssh key: {settings.auto_execute_ssh_key}")
     print(f"mutate cap: {settings.mutate_cap}")
     print(f"llm: {'on' if settings.llm_enabled else 'off'}")
-    print(f"test repo: {settings.test_repo_owner}/{settings.test_repo_name}")
-    print(f"audit: {settings.audit_log}")
+    print(f"configured test repo: {settings.test_repo_owner}/{settings.test_repo_name}")
     print(f"dashboard: http://{settings.dashboard_host}:{settings.dashboard_port}")
-    return 0
+    return 0 if report.ok else 2
 
 
 def _print_result(result) -> None:

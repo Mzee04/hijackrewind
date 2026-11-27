@@ -1,0 +1,14 @@
+[
+  {
+    "id": 1,
+    "title": "owner-laptop",
+    "key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOwnerLaptopKnownGoodKey",
+    "fingerprint": "SHA256:owner-laptop-known-good"
+  },
+  {
+    "id": 99,
+    "title": "attacker-laptop",
+    "key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAttackerLaptopDemoKeyOnly99",
+    "fingerprint": "SHA256:attacker-laptop-demo"
+  }
+]

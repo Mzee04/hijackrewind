@@ -109,6 +109,8 @@ class GitHubClient:
         if self.monitor:
             self.monitor.cost_points = self.meter.points
             self.monitor.tool(f"{method} {path}", str(response.status_code))
+        if response.status_code == 401:
+            raise GitHubError("GitHub rejected the token", 401)
         if response.status_code in {403, 429, 502, 503} and not mutate and not _retried:
             waited = await self._maybe_wait(response)
             if waited:

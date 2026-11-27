@@ -54,7 +54,19 @@ That publishes the same stub on port 8088 and Mailpit on http://127.0.0.1:8025. 
 | `dry-run` | local stub | never |
 | `live` | `api.github.com` | same policy, using `GITHUB_TOKEN` |
 
-Leave `GITHUB_TOKEN` empty for the sandbox. For live mode the token is only the dedicated test account:
+Leave `GITHUB_TOKEN` empty for the sandbox. Live mode was not called against GitHub in this repository. The checks below are covered by recorded responses in `tests/fixtures/github/` and `respx`.
+
+To try live mode yourself, use a free GitHub account that exists only for this experiment:
+
+1. Create the account and one empty repository, for example `hijackrewind-sandbox`.
+2. Create a classic PAT with `admin:public_key` and `user`, or a fine-grained PAT that can write Git SSH keys and email addresses on that account and that one repository.
+3. Put a real key you still want on the account into the known-good manifest. Add one throwaway key you are willing to delete.
+4. Save a real GitHub notification `.eml` for that key. Live mode checks its DKIM signature with DNS.
+5. In `.env` set `HIJACKREWIND_MODE=live`, `GITHUB_TOKEN`, `TEST_GITHUB_LOGIN` (the account login), `TEST_REPO_OWNER`, and `TEST_REPO_NAME`.
+6. Run `python3 -m hijackrewind doctor`. It calls `GET /user` and `GET /repos/{owner}/{repo}` and exits non-zero if the login, the repository, or the classic scopes do not match. It does not list your other repositories.
+7. Run `python3 -m hijackrewind run path/to/alert.eml` only after doctor is clean.
+
+For live mode the token is only that dedicated test account:
 
 - SSH keys: classic `admin:public_key`, or fine-grained Git SSH keys (write)
 - Account emails: classic `user`, or fine-grained Email addresses (write)

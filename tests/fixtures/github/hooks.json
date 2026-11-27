@@ -1,0 +1,3 @@
+[
+  {"id": 70, "name": "web", "active": true, "events": ["push"], "config": {"url": "https://ci.example.com/hook", "content_type": "json"}}
+]
