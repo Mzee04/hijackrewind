@@ -1,9 +1,17 @@
+Authentication-Results: mx.local; dkim=pass header.d=github.com header.from=github.com; spf=pass smtp.mailfrom=github.com
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=github.com;
+ i=@github.com; q=dns/txt; s=test; t=1795810045; h=from : to : subject
+ : date : message-id; bh=X64A33jtlh1QVTPRoBYdy1HfoWGyWU74Ezhl5BB/BKU=;
+ b=UwSsQtY0A8wfkiU8gAunXEckJUgdPyFd5cX+7ktx/zn6+7QXSUJszleIQEEBkQVzLQo1V
+ cLuKWU1xOAR7OpVO6Q7XVf/B5RqrxG7U/6kfen4UWFRupg2LKTQpFsxOeWq/KFYgBSHWPxg
+ Y5PZQ5QEPKnCW+zFm37BrN3qo//0sFAY1tG8FJSu8M8JyC3dB/NRcxmKKOwmTELPr/jvWA3
+ slrI1vJFmuj7Gx3uN9B66ZZ7NMlFQWmMIIOtNX0jo+C/ULG5iZawSVF66lCpm3dNfY1LQwG
+ kwNahQdGK6daqps5TACY1RcT8Voo8Ej/oZxEUindEH2j28q0hbO4nQAdHnmg==
 From: GitHub <noreply@github.com>
 To: owner@example.com
 Subject: [GitHub] A new public key was added to your account
 Date: Fri, 27 Nov 2026 18:05:00 +0000
 Message-ID: <demo-ssh-99@github.com>
-Authentication-Results: mx.local; dkim=pass header.d=github.com header.from=github.com; spf=pass smtp.mailfrom=github.com
 MIME-Version: 1.0
 Content-Type: text/plain; charset=utf-8
 

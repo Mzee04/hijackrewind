@@ -63,6 +63,7 @@ class Document(BaseModel):
     from_domain: str = ""
     reply_to: str = ""
     authentication_results: str = ""
+    raw_bytes: bytes = Field(default=b"", exclude=True)
     screen: ScreenResult | None = None
 
 

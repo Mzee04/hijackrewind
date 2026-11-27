@@ -46,6 +46,14 @@ class Settings(BaseSettings):
     home: str = Field(default=".hijackrewind", validation_alias="HIJACKREWIND_HOME")
     delete_delay: float = Field(default=0.0, validation_alias="HIJACKREWIND_DELETE_DELAY")
     max_retry_wait: float = Field(default=2.0, validation_alias="HIJACKREWIND_MAX_RETRY_WAIT")
+    dkim_dns: str = Field(default="", validation_alias="HIJACKREWIND_DKIM_DNS")
+    test_github_login: str = Field(default="", validation_alias="TEST_GITHUB_LOGIN")
+
+    def dkim_mode(self) -> str:
+        choice = self.dkim_dns.strip().lower()
+        if choice in {"local", "live"}:
+            return choice
+        return "live" if self.mode == "live" else "local"
 
     def allowlisted_domains(self) -> list[str]:
         return [part.strip().lower().rstrip(".") for part in self.sender_allowlist.split(",") if part.strip()]

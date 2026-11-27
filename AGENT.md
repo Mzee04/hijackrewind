@@ -13,7 +13,7 @@ The code was written with an AI coding assistant during the hackathon window. Th
 | `cli.py` | Operator commands. Same pipeline as the dashboard. |
 | `ingest.py` | `.eml`, documents, and `http://127.0.0.1` pages. Refuses the answer-key directory. |
 | `screen.py` | Untrusted-content screen: hidden HTML, base64 instructions, zero-width characters, broken tables, CSV, JSON, and calendars. |
-| `email_auth.py` | `Authentication-Results` alignment and lookalike domains. |
+| `email_auth.py` | DKIM signature verification, alignment, and lookalike domains. |
 | `claims.py` | Regex extraction of a concrete object. No raw document text is copied into a URL. |
 | `policy.py` | The only place a mutate is authorized. |
 | `github_client.py` | One HTTP client: timeouts, kill-switch race, rate-limit wait, path allowlist. |

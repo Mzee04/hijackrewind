@@ -90,7 +90,11 @@ async def run_document(document: Document, services: Services) -> RunResult:
                 request={"kind": lure.kind, "host": lure.host, "path": lure.path or "/"},
             )
         services.monitor.update(step="verify")
-        channel = verify_channel(document, services.settings.allowlisted_domains())
+        channel = verify_channel(
+            document,
+            services.settings.allowlisted_domains(),
+            dns=services.settings.dkim_mode(),
+        )
         trace.event(
             step="verify",
             decision="verified" if channel.verified else "rejected",

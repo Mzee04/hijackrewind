@@ -1,17 +1,17 @@
-"""Authentication-Results alignment. Fail closed when the attestation is missing.
+"""Channel checks. A revert needs a DKIM signature that verifies in code.
 
-This parses the border MTA's Authentication-Results header. It does not
-recompute a DKIM signature. Sandbox fixtures are not signed by GitHub.
+Authentication-Results is recorded and ignored as proof. Sandbox mode resolves
+the test key locally. Live mode uses DNS. Header-only dkim=pass is unverified.
 """
 
 from __future__ import annotations
 
 import re
 
+from hijackrewind.dkim_verify import check_signature
 from hijackrewind.models import ChannelVerdict, Document
 
 _DKIM = re.compile(r"\bdkim\s*=\s*(pass|fail|none|neutral|temperror|permerror|policy)\b", re.I)
-_HEADER_D = re.compile(r"\bheader\.d\s*=\s*([A-Za-z0-9.-]+)", re.I)
 _ALERT = re.compile(
     r"new public key|ssh key|deploy key|signing key|gpg key|was added to your account|webhook",
     re.I,
@@ -71,7 +71,7 @@ def is_lookalike(domain: str, allowlist: list[str]) -> bool:
     return False
 
 
-def verify_channel(document: Document, allowlist: list[str]) -> ChannelVerdict:
+def verify_channel(document: Document, allowlist: list[str], *, dns: str = "local") -> ChannelVerdict:
     domain = _labels(document.from_domain)
     lookalike = is_lookalike(domain, allowlist) if domain else False
     visible = document.visible_text or ""
@@ -94,51 +94,39 @@ def verify_channel(document: Document, allowlist: list[str]) -> ChannelVerdict:
             pretends_github=False,
         )
 
+    signature = check_signature(document.raw_bytes or b"", dns=dns)
+    d_domain = _labels(signature.domain)
     header = document.authentication_results or ""
-    if not header.strip():
+    header_match = _DKIM.search(header)
+    header_says_pass = bool(header_match and header_match.group(1).lower() == "pass")
+    signed_lookalike = bool(d_domain) and is_lookalike(d_domain, allowlist)
+    if not signature.ok:
+        reason = signature.reason
+        if header_says_pass and "missing" in reason:
+            reason = "Authentication-Results says dkim=pass but there is no verifiable signature"
         return ChannelVerdict(
             verified=False,
-            reason="missing Authentication-Results",
-            from_domain=domain,
-            lookalike=lookalike,
-            pretends_github=pretends,
-        )
-    dkim_match = _DKIM.search(header)
-    dkim = dkim_match.group(1).lower() if dkim_match else ""
-    d_match = _HEADER_D.search(header)
-    d_domain = _labels(d_match.group(1)) if d_match else ""
-    if dkim != "pass":
-        return ChannelVerdict(
-            verified=False,
-            reason=f"dkim is {dkim or 'missing'}",
+            reason=reason,
             from_domain=domain,
             dkim_domain=d_domain,
-            lookalike=lookalike,
-            pretends_github=pretends,
+            lookalike=lookalike or signed_lookalike,
+            pretends_github=pretends or signed_lookalike,
         )
-    if not d_domain:
-        return ChannelVerdict(
-            verified=False,
-            reason="dkim=pass without header.d",
-            from_domain=domain,
-            lookalike=lookalike,
-            pretends_github=pretends,
-        )
-    aligned = domain == d_domain or domain.endswith("." + d_domain)
+    aligned = bool(d_domain) and (domain == d_domain or domain.endswith("." + d_domain))
     if not aligned:
         return ChannelVerdict(
             verified=False,
-            reason="From domain is not aligned with dkim d=",
+            reason="From domain is not aligned with the DKIM signature",
             from_domain=domain,
             dkim_domain=d_domain,
-            lookalike=lookalike or is_lookalike(d_domain, allowlist),
-            pretends_github=pretends or is_lookalike(d_domain, allowlist),
+            lookalike=lookalike or signed_lookalike,
+            pretends_github=pretends or signed_lookalike,
         )
     if not is_allowlisted(d_domain, allowlist):
         fake = is_lookalike(d_domain, allowlist)
         return ChannelVerdict(
             verified=False,
-            reason="lookalike sending domain" if fake else "sending domain is not allowlisted",
+            reason="lookalike sending domain" if fake else "signing domain is not allowlisted",
             from_domain=domain,
             dkim_domain=d_domain,
             lookalike=fake,
@@ -146,7 +134,7 @@ def verify_channel(document: Document, allowlist: list[str]) -> ChannelVerdict:
         )
     return ChannelVerdict(
         verified=True,
-        reason=f"dkim=pass aligned with {d_domain}",
+        reason=f"DKIM signature verified for {d_domain}",
         from_domain=domain,
         dkim_domain=d_domain,
         lookalike=False,

@@ -41,7 +41,7 @@ That publishes the same stub on port 8088 and Mailpit on http://127.0.0.1:8025. 
 
 1. Read an `.eml`, a local page, or a document (`hijackrewind run PATH`).
 2. Treat the bytes as untrusted data. Hidden text, encoded instructions, and lure URLs are flagged. Lure hosts are written to the audit log and are not opened.
-3. For email, require `Authentication-Results` with `dkim=pass` and a From domain aligned with an allowlisted domain (default `github.com`). Lookalikes such as `github.com.evil.test` are quarantined.
+3. For email, verify the DKIM signature. Sandbox mode uses the bundled test key and does not query DNS. Live mode queries DNS. `Authentication-Results: dkim=pass` without a signature that verifies is not enough. The signing domain must align with From and be allowlisted (default `github.com`). Lookalikes such as `github.com.evil.test` are quarantined.
 4. Extract a concrete object (key id, email, hook id, and so on) and compare it with the live API or the stub.
 5. If the object is missing, or it is on the known-good manifest, stop.
 6. Write a dry-run plan. In `dry-run` mode, stop there. In `sandbox` or `live`, policy may delete one verified unknown SSH key. Anything else needs `hijackrewind approve PLAN_ID`.
@@ -80,7 +80,7 @@ Not implemented, and not claimed:
 - Any non-GitHub account
 - Scraping github.com HTML
 
-`Authentication-Results` is parsed as the inbox provider's attestation. The sandbox fixtures are not DKIM-signed by GitHub, so this project does not recompute DKIM signatures. Missing or failing alignment means no mutate.
+DKIM is checked with dkimpy. The sandbox fixture is signed by selector `test` at `github.com` and the public key is `sandbox/fixtures/dkim-test-key.txt`. That key is not GitHub's. Live mode resolves the real selector from DNS. A failed or missing signature means no mutate.
 
 The known-good list is `sandbox/fixtures/known-good.json`. Objects on it are never deleted. The primary email is never deleted.
 

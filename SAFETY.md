@@ -38,7 +38,7 @@ The dashboard at `127.0.0.1:8765` shows the step, tool calls, decision, rate-lim
 
 ## Fail closed
 
-Missing `Authentication-Results`, a lookalike domain, an API error, a timeout, an unknown modality, or a lure URL produces no mutate. The trace records the stop. Trap Pack files are hostile inputs; instructions inside them are ignored.
+A missing DKIM signature, a signature that does not verify, a lookalike domain, an API error, a timeout, an unknown modality, or a lure URL produces no mutate. `Authentication-Results: dkim=pass` is not treated as a signature. The trace records the stop. Trap Pack files are hostile inputs; instructions inside them are ignored.
 
 ## Personal data
 

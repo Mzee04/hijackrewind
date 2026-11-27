@@ -6,6 +6,7 @@ import pytest
 from hijackrewind.egress import EgressDenied
 from hijackrewind.pipeline import run_source
 from hijackrewind.runtime import demo_alert_path, demo_seed, load_seed, reset_stub, stub_state
+from tests.mailsign import write_signed_alert
 
 
 def test_sandbox_deletes_only_the_unknown_ssh_key(services):
@@ -30,14 +31,10 @@ def test_dry_run_does_not_mutate(services):
 
 def test_known_good_key_is_not_deleted(services, tmp_path):
     alert = tmp_path / "known.eml"
-    alert.write_text(
-        "From: GitHub <noreply@github.com>\n"
-        "Subject: [GitHub] A new public key was added to your account\n"
-        "Authentication-Results: mx.local; dkim=pass header.d=github.com\n"
-        "\n"
-        "A new public key was added to your account.\n"
-        "Key id: 1\n",
-        encoding="utf-8",
+    write_signed_alert(
+        alert,
+        subject="[GitHub] A new public key was added to your account",
+        body="A new public key was added to your account.\nKey id: 1\n",
     )
     result = asyncio.run(run_source(str(alert), services))
     ids = [item["id"] for item in stub_state(services.settings.stub_url)["ssh_keys"]]
@@ -105,13 +102,10 @@ def test_email_delete_needs_approval_and_skips_known_good(services, tmp_path):
     seed["emails"].append({"email": "attacker@example.net", "primary": False, "verified": True})
     reset_stub(services.settings.stub_url, seed)
     alert = tmp_path / "email.eml"
-    alert.write_text(
-        "From: GitHub <noreply@github.com>\n"
-        "Subject: [GitHub] A new email address was added to your account\n"
-        "Authentication-Results: mx.local; dkim=pass header.d=github.com\n"
-        "\n"
-        "A new email address was added: attacker@example.net\n",
-        encoding="utf-8",
+    write_signed_alert(
+        alert,
+        subject="[GitHub] A new email address was added to your account",
+        body="A new email address was added: attacker@example.net\n",
     )
     result = asyncio.run(run_source(str(alert), services))
     assert result.status == "pending_approval"

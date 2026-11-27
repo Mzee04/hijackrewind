@@ -109,6 +109,7 @@ def document_from_email(data: bytes, source: str) -> Document:
         from_domain=domain,
         reply_to=reply,
         authentication_results=" ".join(auth_headers),
+        raw_bytes=data,
         screen=screened,
     )
 
