@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HijackRewind</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #12151c;
+    --panel: #1c2230;
+    --ink: #eef2f6;
+    --muted: #a8b3c4;
+    --line: #313a4d;
+    --ok: #7dcea0;
+    --warn: #f0c674;
+    --stop: #e06c75;
+    --accent: #8ab4f8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 16px/1.45 "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--line);
+    background: #0e1117;
+  }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 15px; margin: 0 0 8px; color: var(--muted); font-weight: 600; }
+  p { margin: 0; }
+  button, input {
+    font: inherit;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: #2a3344;
+    color: var(--ink);
+    padding: 8px 12px;
+  }
+  button { cursor: pointer; }
+  button.kill {
+    background: var(--stop);
+    color: #1a0b0d;
+    border: 0;
+    font-weight: 700;
+    min-width: 160px;
+    min-height: 44px;
+  }
+  button.kill[disabled] { opacity: 0.55; }
+  main {
+    display: grid;
+    grid-template-columns: 1.2fr 0.8fr;
+    gap: 16px;
+    padding: 16px 20px 32px;
+  }
+  section {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 16px;
+  }
+  .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #2a3344;
+    color: var(--accent);
+    font-size: 13px;
+  }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  ol, ul { margin: 8px 0 0; padding-left: 18px; }
+  li { margin: 4px 0; }
+  code, pre {
+    font-family: ui-monospace, monospace;
+    font-size: 13px;
+  }
+  pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: #0e1117;
+    padding: 10px;
+    border-radius: 8px;
+    max-height: 240px;
+    overflow: auto;
+  }
+  .muted { color: var(--muted); }
+  .stop { color: var(--stop); }
+  .ok { color: var(--ok); }
+  @media (max-width: 800px) {
+    main { grid-template-columns: 1fr; }
+    header { align-items: flex-start; flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>HijackRewind</h1>
+    <p class="muted" id="mode">loading</p>
+  </div>
+  <div class="row">
+    <button id="demo" type="button">Run sandbox demo</button>
+    <button id="kill" class="kill" type="button">Kill switch</button>
+  </div>
+</header>
+<main>
+  <div>
+    <section>
+      <h2>Live run</h2>
+      <p><span class="pill" id="step">idle</span> <span id="run"></span></p>
+      <p id="summary" style="margin-top:8px">No run yet.</p>
+      <p class="muted" id="cost" style="margin-top:8px">Rate-limit points this run: 0</p>
+    </section>
+    <section>
+      <h2>Tool calls</h2>
+      <ol id="tools"><li class="muted">none</li></ol>
+    </section>
+    <section>
+      <h2>Start a path</h2>
+      <form id="run-form" class="row">
+        <input id="source" name="source" size="48" placeholder="sandbox/fixtures/genuine-new-ssh-key.eml" aria-label="Alert path">
+        <button type="submit">Run</button>
+      </form>
+      <p class="muted" style="margin-top:8px">The SSH-key demo executes by policy. Other reverts wait for approval.</p>
+    </section>
+  </div>
+  <div>
+    <section>
+      <h2>Plan</h2>
+      <pre id="plan">No plan.</pre>
+      <div class="row" style="margin-top:8px">
+        <button id="approve" type="button">Approve</button>
+        <button id="deny" type="button">Deny</button>
+      </div>
+    </section>
+    <section>
+      <h2>Blocked outbound</h2>
+      <ul id="blocked"><li class="muted">none</li></ul>
+    </section>
+    <section>
+      <h2>Audit tail</h2>
+      <pre id="audit">No events.</pre>
+    </section>
+  </div>
+</main>
+<script>
+const step = document.querySelector("#step");
+const run = document.querySelector("#run");
+const summary = document.querySelector("#summary");
+const cost = document.querySelector("#cost");
+const tools = document.querySelector("#tools");
+const plan = document.querySelector("#plan");
+const blocked = document.querySelector("#blocked");
+const audit = document.querySelector("#audit");
+const mode = document.querySelector("#mode");
+const kill = document.querySelector("#kill");
+let planId = "";
+
+function list(node, items, render) {
+  node.replaceChildren();
+  if (!items.length) {
+    const li = document.createElement("li");
+    li.className = "muted";
+    li.textContent = "none";
+    node.append(li);
+    return;
+  }
+  for (const item of items) {
+    const li = document.createElement("li");
+    li.textContent = render(item);
+    node.append(li);
+  }
+}
+
+async function tick() {
+  const state = await (await fetch("/api/state")).json();
+  const tail = await (await fetch("/api/audit")).json();
+  mode.textContent = state.mode + (state.kill.tripped ? " · kill switch tripped" : " · kill switch clear");
+  kill.disabled = state.kill.tripped;
+  const live = state.run || {};
+  step.textContent = live.step || "idle";
+  run.textContent = live.run_id ? live.run_id : "";
+  summary.textContent = live.summary || live.decision || "Waiting.";
+  cost.textContent = "Rate-limit points this run: " + (live.cost_points || 0);
+  list(tools, live.tools || [], (item) => item.name + " → " + item.outcome);
+  list(blocked, live.blocked || [], (item) => (item.kind || "http") + " " + (item.host || "") + (item.path || ""));
+  planId = live.plan && live.plan.id || "";
+  plan.textContent = live.plan ? JSON.stringify(live.plan, null, 2) : "No plan.";
+  audit.textContent = (tail.events || []).map((event) =>
+    event.seq + " " + event.actor + " " + event.action + " " + (event.detail && event.detail.status || event.detail && event.detail.reason || "")
+  ).join("\n") || "No events.";
+}
+
+async function post(url, body) {
+  await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body || {})});
+  tick();
+}
+
+document.querySelector("#kill").addEventListener("click", () => post("/api/kill", {reason: "dashboard button"}));
+document.querySelector("#demo").addEventListener("click", () => post("/api/demo", {}));
+document.querySelector("#approve").addEventListener("click", () => { if (planId) post("/api/plans/" + planId + "/approve", {}); });
+document.querySelector("#deny").addEventListener("click", () => { if (planId) post("/api/plans/" + planId + "/deny", {}); });
+document.querySelector("#run-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const source = new FormData(event.target).get("source");
+  if (source) post("/api/runs", {source});
+});
+tick();
+setInterval(tick, 400);
+</script>
+</body>
+</html>

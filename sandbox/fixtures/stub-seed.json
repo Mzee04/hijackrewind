@@ -1,0 +1,38 @@
+{
+  "ssh_keys": [
+    {
+      "id": 1,
+      "title": "owner-laptop",
+      "fingerprint": "SHA256:owner-laptop-known-good",
+      "key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOwnerLaptopKnownGoodKey"
+    }
+  ],
+  "emails": [
+    {
+      "email": "owner@example.com",
+      "primary": true,
+      "verified": true,
+      "visibility": "private"
+    }
+  ],
+  "gpg_keys": [{"id": 10, "title": "owner-gpg"}],
+  "ssh_signing_keys": [{"id": 11, "title": "owner-signing"}],
+  "repos": {
+    "test-owner/test-repo": {
+      "deploy_keys": [
+        {
+          "id": 50,
+          "title": "ci-read-only",
+          "read_only": true
+        }
+      ],
+      "hooks": [{"id": 70, "url": "https://ci.example.com/hook"}],
+      "collaborators": [{"login": "owner", "role": "admin"}],
+      "protections": {
+        "main": {
+          "required_pull_request_reviews": {"required_approving_review_count": 1}
+        }
+      }
+    }
+  }
+}

@@ -24,6 +24,9 @@ ALLOW_SUBSTRINGS = (
     "ghp_your_token_here",
     "github_pat_your_token_here",
     "sk-your_key_here",
+    # Fixed fake values used by redaction tests. Not credentials.
+    "ghp_abcdefghijklmnopqrstuvwxyz123456",
+    "github_pat_abcdefghijklmnopqrstuvwxyz",
 )
 
 

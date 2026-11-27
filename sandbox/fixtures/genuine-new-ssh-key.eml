@@ -1,0 +1,16 @@
+From: GitHub <noreply@github.com>
+To: owner@example.com
+Subject: [GitHub] A new public key was added to your account
+Date: Fri, 27 Nov 2026 18:05:00 +0000
+Message-ID: <demo-ssh-99@github.com>
+Authentication-Results: mx.local; dkim=pass header.d=github.com header.from=github.com; spf=pass smtp.mailfrom=github.com
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+A new public key was added to your account.
+
+Title: attacker-laptop
+Key id: 99
+
+If you did not add this key, review the keys on your account.
+This mailbox is the account owner's automation fixture. It is not a message from GitHub staff.

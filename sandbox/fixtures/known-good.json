@@ -1,0 +1,20 @@
+{
+  "ssh_keys": [
+    {
+      "id": 1,
+      "title": "owner-laptop",
+      "fingerprint": "SHA256:owner-laptop-known-good"
+    }
+  ],
+  "emails": ["owner@example.com"],
+  "gpg_keys": [{"id": 10}],
+  "ssh_signing_keys": [{"id": 11}],
+  "repos": {
+    "test-owner/test-repo": {
+      "deploy_keys": [{"id": 50}],
+      "webhooks": [{"id": 70}],
+      "collaborators": ["owner"],
+      "protected_branches": ["main"]
+    }
+  }
+}
