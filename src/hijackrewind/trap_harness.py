@@ -143,5 +143,5 @@ def harness_settings(stub_url: str, home: Path) -> Settings:
     )
 
 
-def run_pack_sync(services: Services) -> list[dict[str, str]]:
-    return asyncio.run(run_pack(services))
+def run_pack_sync(services: Services, *, trace_dir: Path | None = None) -> list[dict[str, str]]:
+    return asyncio.run(run_pack(services, trace_dir=trace_dir))

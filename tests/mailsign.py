@@ -11,8 +11,8 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from hijackrewind.dkim_verify import register_dkim_txt, sign_message
 
 
-def write_signed_alert(path: Path, *, subject: str, body: str, domain: str = "github.com") -> None:
-    message = _unsigned(subject=subject, body=body, domain=domain)
+def write_signed_alert(path: Path, *, subject: str, body: str, domain: str = "github.com", local: str = "noreply") -> None:
+    message = _unsigned(subject=subject, body=body, domain=domain, local=local)
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     pem = key.private_bytes(
         serialization.Encoding.PEM,
@@ -29,9 +29,9 @@ def write_signed_alert(path: Path, *, subject: str, body: str, domain: str = "gi
     path.write_bytes(signed)
 
 
-def _unsigned(*, subject: str, body: str, domain: str) -> bytes:
+def _unsigned(*, subject: str, body: str, domain: str, local: str = "noreply") -> bytes:
     lines = [
-        f"From: GitHub <noreply@{domain}>",
+        f"From: GitHub <{local}@{domain}>",
         "To: owner@example.com",
         f"Subject: {subject}",
         "Date: Fri, 27 Nov 2026 18:05:00 +0000",

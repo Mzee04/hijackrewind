@@ -110,3 +110,55 @@ def test_wrong_dashboard_token_is_401_with_a_reason(settings):
     )
     assert response.status_code == 401
     assert response.json()["detail"] == "dashboard token was rejected"
+
+
+def test_signed_github_notification_cannot_start_a_plan(services, tmp_path):
+    from tests.mailsign import write_signed_alert
+
+    reset_stub(services.settings.stub_url, demo_seed())
+    alert = tmp_path / "notification.eml"
+    write_signed_alert(alert, subject="[GitHub] A new public key was added to your account",
+                       body="A new public key was added.\nKey id: 99\n", local="notifications")
+    result = asyncio.run(run_source(str(alert), services))
+    assert result.status != "executed"
+    assert result.mutated == []
+    reasons = [e["detail"].get("reason") for e in services.audit.read_all() if e["action"] == "channel_rejected"]
+    assert reasons == ["sender address is not an account-alert sender"]
+
+
+def test_webhook_rewind_body_drops_the_masked_secret(services, tmp_path):
+    from hijackrewind.runtime import load_seed, stub_state
+    from tests.mailsign import write_signed_alert
+
+    seed = load_seed()
+    seed["repos"]["test-owner/test-repo"]["hooks"].append(
+        {"id": 88, "events": ["push"], "active": True,
+         "config": {"url": "https://collector.evil.test/x", "content_type": "json", "secret": "********"}}
+    )
+    reset_stub(services.settings.stub_url, seed)
+    alert = tmp_path / "hook.eml"
+    write_signed_alert(alert, subject="[GitHub] A webhook was added to your repository", body="A webhook was added.\nHook id: 88\n")
+    asyncio.run(run_source(str(alert), services))
+    records = [json.loads(p.read_text()) for p in (Path(services.settings.home) / "actions").glob("*.json")]
+    hook = next(r for r in records if r["kind"] == "webhook")
+    assert "secret" not in hook["reverse_body"]["config"]
+    assert hook["reverse_body"]["config"]["url"] == "https://collector.evil.test/x"
+
+
+def test_pending_record_needs_reconcile_before_rewind(services):
+    from hijackrewind.policy import authorize_rewind
+
+    ok, reason = authorize_rewind({"status": "pending", "reverse_method": "POST", "reverse_path": "/user/keys"}, services.settings)
+    assert not ok and "reconcile" in reason
+
+
+def test_dot_segments_are_refused():
+    import pytest
+
+    from hijackrewind.audit import AuditLog
+    from hijackrewind.egress import EgressDenied, EgressLog
+
+    import tempfile
+    log = EgressLog(audit=AuditLog(Path(tempfile.mkdtemp()) / "a.jsonl"), api_host="127.0.0.1")
+    with pytest.raises(EgressDenied):
+        log.assert_api("DELETE", "http://127.0.0.1:8088/repos/test-owner/test-repo/branches/../protection")

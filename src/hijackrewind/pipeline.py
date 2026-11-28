@@ -104,6 +104,11 @@ async def run_document(document: Document, services: Services) -> RunResult:
             services.settings.allowlisted_domains(),
             dns=services.settings.dkim_mode(),
         )
+        if channel.verified and (document.from_address or "").lower() not in services.settings.alert_sender_addresses():
+            # A signed GitHub notification (an issue comment, for example) carries text
+            # a stranger wrote. Only the account-alert sender can start a plan.
+            channel.verified = False
+            channel.reason = "sender address is not an account-alert sender"
         if channel.verified and document.raw_bytes:
             from hijackrewind.dkim_verify import remember_message
 
@@ -679,7 +684,8 @@ async def _cross_check(claims: list[Claim], services: Services) -> tuple[list[Pl
                     reverse_method="POST",
                     reverse_path=f"/repos/{owner}/{repo}/hooks",
                     reverse_body={
-                        "config": match.get("config") or {},
+                        # GitHub returns a masked secret. Posting the mask would set it as the secret.
+                        "config": {k: v for k, v in (match.get("config") or {}).items() if k != "secret"},
                         "events": match.get("events") or ["push"],
                         "active": bool(match.get("active", True)),
                     },

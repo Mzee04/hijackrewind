@@ -35,6 +35,7 @@ class Settings(BaseSettings):
         validation_alias="HIJACKREWIND_MANIFEST",
     )
     sender_allowlist: str = Field(default="github.com", validation_alias="HIJACKREWIND_SENDER_ALLOWLIST")
+    alert_senders: str = Field(default="noreply@github.com", validation_alias="HIJACKREWIND_ALERT_SENDERS")
     auto_execute_ssh_key: bool = Field(default=False, validation_alias="HIJACKREWIND_AUTO_EXECUTE_SSH_KEY")
     auto_execute_containment: bool = Field(default=False, validation_alias="HIJACKREWIND_AUTO_EXECUTE_CONTAINMENT")
     mutate_cap: int = Field(default=1, validation_alias="HIJACKREWIND_MUTATE_CAP")
@@ -76,6 +77,9 @@ class Settings(BaseSettings):
         if choice in {"local", "live"}:
             return choice
         return "live" if self.mode == "live" else "local"
+
+    def alert_sender_addresses(self) -> set[str]:
+        return {part.strip().lower() for part in self.alert_senders.split(",") if part.strip()}
 
     def allowlisted_domains(self) -> list[str]:
         return [part.strip().lower().rstrip(".") for part in self.sender_allowlist.split(",") if part.strip()]

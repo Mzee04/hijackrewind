@@ -141,7 +141,7 @@ The optional LLM is off unless `HIJACKREWIND_LLM_ENABLED=true` and a base URL ar
 
 ## Rollback limits
 
-A rewind posts the saved public key or webhook config. GitHub does not return a webhook secret, so the restored hook has no secret. Creating the object again assigns a new id. An action whose outcome is unknown must be reconciled before rewind. A restore that does not show up on a follow-up read is `restore_unconfirmed` and is not reported as rolled back.
+A rewind posts the saved public key or webhook config. GitHub returns the webhook secret masked, so the masked value is dropped and the restored hook has no secret. Creating the object again assigns a new id. An action whose outcome is unknown, or whose record is still `pending` because the process stopped mid-request, must be reconciled before rewind. A restore that does not show up on a follow-up read is `restore_unconfirmed` and is not reported as rolled back.
 
 ## Kill switch, audit log, dashboard
 
@@ -157,7 +157,7 @@ A rewind posts the saved public key or webhook config. GitHub does not return a 
 
 The asset is the configured test account, or the local stub standing in for it, plus the audit log. The expected adversary is a forged or replayed alert, a document that tries to instruct the agent, or a browser page that tries to press a dashboard button.
 
-The checks that hold that boundary are cryptographic DKIM (From, Subject, and Date must be signed; `l=` is rejected; `t=` and Date must fall inside 14 days; a repeated Message-ID plus signature is rejected), claims taken only from the signed `text/plain` part, classification against the live object and the known-good manifest, a code policy that ignores the plan's disposition label, a dry-run block inside the HTTP client, a rollback record written before the request, plan expiry and one-time approval under a single execution lock, and dashboard token, CSRF, and local origin checks.
+The checks that hold that boundary are an exact alert sender (`HIJACKREWIND_ALERT_SENDERS`, default `noreply@github.com`, because GitHub notification mail is also signed by github.com but carries text other people wrote), cryptographic DKIM (From, Subject, and Date must be signed; `l=` is rejected; `t=` and Date must fall inside 14 days; a repeated Message-ID plus signature is rejected), claims taken only from the signed `text/plain` part, classification against the live object and the known-good manifest, a code policy that ignores the plan's disposition label, a dry-run block inside the HTTP client, a rollback record written before the request, plan expiry and one-time approval under a single execution lock, and dashboard token, CSRF, and local origin checks.
 
 Out of scope: cancelling a GitHub mutation the server has already applied, restoring a webhook secret, keeping the same id after a recreate, revoking OAuth grants, other personal access tokens, or web sessions, and calling any host other than the stub or `https://api.github.com`.
 

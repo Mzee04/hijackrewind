@@ -74,7 +74,7 @@ async def reconcile(services: Services, action_id: str) -> dict:
     record = load_action(services, action_id)
     present = await _object_present(services, record.get("path") or "", record.get("before") or {})
     record["reconciled"] = "present" if present else "absent"
-    if record.get("status") == "outcome_unknown":
+    if record.get("status") in {"outcome_unknown", "pending"}:
         record["status"] = "executed" if not present and record.get("method") == "DELETE" else "reconciled"
     write_action(services, record)
     services.audit.append(
