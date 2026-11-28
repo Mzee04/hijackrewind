@@ -46,7 +46,7 @@ The dashboard is the live view, the approval buttons, and the kill switch:
 python3 -m hijackrewind dashboard
 ```
 
-Open http://127.0.0.1:8765 and press **Run sandbox demo**. The run finishes on its own.
+Open http://127.0.0.1:8765, enter the operator token, and press **Sandbox demo**. Auto-execute is off on this path, so the run holds the unknown key 99 and the plan waits for approval. Press **Approve held plan** to remove it. The timeline, actions, and hash chain update live. A wrong or missing token is refused and the page shows the error.
 
 Optional full sandbox, if you have Docker:
 

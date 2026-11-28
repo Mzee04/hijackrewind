@@ -85,3 +85,28 @@ def test_cli_reconcile_reports_a_tripped_switch_cleanly(services, monkeypatch, c
     finally:
         services.kill.reset()
     assert "kill --reset" in capsys.readouterr().err
+
+
+def test_dashboard_shows_a_refused_request():
+    html = (Path(__file__).resolve().parents[1] / "src" / "hijackrewind" / "dashboard.html").read_text(encoding="utf-8")
+    assert 'id="request-error"' in html
+    assert "if (!response.ok)" in html
+    assert '$("request-error").textContent = message;' in html
+
+
+def test_wrong_dashboard_token_is_401_with_a_reason(settings):
+    from fastapi.testclient import TestClient
+    from pydantic import SecretStr
+
+    from hijackrewind.dashboard import create_dashboard
+
+    settings.dashboard_token = SecretStr("right-token")
+    client = TestClient(create_dashboard(settings), base_url="http://127.0.0.1")
+    client.get("/")
+    response = client.post(
+        "/api/kill",
+        json={"reason": "x"},
+        headers={"X-HijackRewind-Token": "wrong", "X-CSRF-Token": client.cookies.get("hijackrewind_csrf")},
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"] == "dashboard token was rejected"

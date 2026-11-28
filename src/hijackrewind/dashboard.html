@@ -39,6 +39,7 @@
   <div>
     <h1>HijackRewind</h1>
     <p id="mode">loading</p>
+    <p id="request-error" class="bad" role="alert"></p>
   </div>
   <div class="row">
     <input id="token" type="password" placeholder="operator token" aria-label="Operator token" autocomplete="off">
@@ -158,7 +159,14 @@ function authHeaders() {
 }
 
 async function post(url, body) {
-  await fetch(url, {method: "POST", headers: authHeaders(), body: JSON.stringify(body || {})});
+  const response = await fetch(url, {method: "POST", headers: authHeaders(), body: JSON.stringify(body || {})});
+  let message = "";
+  if (!response.ok) {
+    let detail = "";
+    try { detail = (await response.json()).detail || ""; } catch (error) { detail = ""; }
+    message = "Refused (" + response.status + ")" + (detail ? ": " + detail : "");
+  }
+  $("request-error").textContent = message;
   tick();
 }
 
