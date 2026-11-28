@@ -61,3 +61,14 @@ def test_replay_is_still_refused_without_the_demo_reset(services):
     reset_stub(services.settings.stub_url, demo_seed())
     again = asyncio.run(run_source(str(demo_alert_path()), services))
     assert again.status != "executed"
+
+
+def test_dashboard_script_ids_exist():
+    import re
+
+    html = (Path(__file__).resolve().parents[1] / "src" / "hijackrewind" / "dashboard.html").read_text(encoding="utf-8")
+    assert "const $ = (id) => document.getElementById(id);" in html
+    ids = set(re.findall(r'id="([^"]+)"', html))
+    used = set(re.findall(r'\$\("([^"]+)"\)', html))
+    assert used, "dashboard script uses no element ids"
+    assert used <= ids, f"script references missing ids: {sorted(used - ids)}"
