@@ -143,6 +143,18 @@ def remember_message(home: Path, raw: bytes) -> bool:
     return True
 
 
+def forget_message(home: Path, raw: bytes) -> None:
+    """Drop one message from the replay record. Used only by the sandbox demo fixture."""
+    path = Path(home) / "seen-messages.json"
+    if not path.is_file():
+        return
+    digest = hashlib.sha256(_replay_material(raw)).hexdigest()
+    seen = set(json.loads(path.read_text(encoding="utf-8")))
+    if digest in seen:
+        seen.discard(digest)
+        path.write_text(json.dumps(sorted(seen)), encoding="utf-8")
+
+
 def _replay_material(raw: bytes) -> bytes:
     header = _signature_header(raw) or b""
     message_id = b""

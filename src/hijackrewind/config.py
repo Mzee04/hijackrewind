@@ -16,11 +16,14 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         extra="ignore",
         populate_by_name=True,
+        # Exact, upper-case env names only. Without this, populate_by_name lets
+        # the field name match a generic variable: HOME would become `home`.
+        case_sensitive=True,
     )
 
     mode: Literal["sandbox", "dry-run", "live"] = Field(
         default="sandbox",
-        validation_alias=AliasChoices("HIJACKREWIND_MODE", "MODE"),
+        validation_alias=AliasChoices("HIJACKREWIND_MODE"),
     )
     stub_url: str = Field(default="http://127.0.0.1:8088", validation_alias="HIJACKREWIND_STUB_URL")
     github_token: SecretStr = Field(default=SecretStr(""), validation_alias="GITHUB_TOKEN")

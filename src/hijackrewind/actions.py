@@ -103,8 +103,19 @@ async def _object_present(services: Services, path: str, body: dict) -> bool:
     if "/protection" in path:
         current = await services.github.get_json(path)
         return current is not None
-    if path.startswith("/user/keys/"):
-        wanted = path.rsplit("/", 1)[-1]
-        rows = await services.github.get_json("/user/keys") or []
-        return any(str(item.get("id")) == wanted for item in rows)
+    if path == "/user/emails":
+        wanted = {str(item).lower() for item in (body or {}).get("emails", [])}
+        if not wanted and (body or {}).get("email"):
+            wanted = {str(body["email"]).lower()}
+        rows = await services.github.get_json(path) or []
+        return any(str(item.get("email", "")).lower() in wanted for item in rows)
+    # DELETE of one object: /user/keys/1, /repos/o/r/keys/7, /repos/o/r/hooks/9,
+    # /user/gpg_keys/3, /repos/o/r/collaborators/login. Read the parent list.
+    parent, _, wanted = path.rpartition("/")
+    if parent and wanted:
+        rows = await services.github.get_json(parent) or []
+        return any(
+            str(item.get("id")) == wanted or str(item.get("login", "")).lower() == wanted.lower()
+            for item in rows
+        )
     return False

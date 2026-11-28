@@ -83,7 +83,7 @@ async def live_preflight(settings: Settings) -> PreflightReport:
     return PreflightReport(
         True,
         (
-            f"mode: live",
+            "mode: live",
             f"account: {login}",
             f"repo: {full_name}",
             scope_line,

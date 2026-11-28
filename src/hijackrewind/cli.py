@@ -19,6 +19,7 @@ from hijackrewind.runtime import (
     demo_alert_path,
     demo_seed,
     ensure_stub,
+    forget_demo_alert,
     reset_stub,
     stub_state,
 )
@@ -131,6 +132,7 @@ async def _demo(kill_scene: bool) -> int:
     if services.kill.tripped:
         services.kill.reset(audit=services.audit)
     reset_stub(settings.stub_url, demo_seed())
+    forget_demo_alert(settings)
     before = [item["id"] for item in stub_state(settings.stub_url)["ssh_keys"]]
     print(f"stub {settings.stub_url} ssh key ids before: {before}")
     alert = demo_alert_path()
