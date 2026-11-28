@@ -12,7 +12,7 @@ from pathlib import Path
 from hijackrewind.config import Settings
 from hijackrewind.models import RunResult
 from hijackrewind.pipeline import run_source
-from hijackrewind.runtime import Services, build_services, load_seed, repo_root, reset_stub
+from hijackrewind.runtime import Services, load_seed, repo_root, reset_stub
 
 PACK_RELATIVE = Path("official-trap-pack") / "traps"
 RESULTS = Path("tests") / "trap-pack" / "RESULTS.md"

@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 from hijackrewind.runtime import build_services, repo_root
 from hijackrewind.trap_harness import harness_settings, run_pack_sync, write_results

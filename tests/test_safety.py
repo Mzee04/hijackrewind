@@ -48,7 +48,6 @@ def test_lure_url_is_not_fetched(services, tmp_path):
 
     config_server = None
     # A real socket honeypot so a mistaken client would increment hits.
-    import socket
     import threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 

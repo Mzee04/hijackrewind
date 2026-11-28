@@ -56,6 +56,16 @@ docker compose up --build
 
 That publishes the same stub on port 8088 and Mailpit on http://127.0.0.1:8025. `hijackrewind demo` uses the stub that is already healthy.
 
+Without Docker, keep one stub running in its own terminal so `rewind`, `approve`, and `reconcile` (separate processes) see the state that `demo` or `run` changed:
+
+```bash
+python3 -m uvicorn hijackrewind.stub_app:app --host 127.0.0.1 --port 8088
+```
+
+If nothing is listening on 8088, each command starts a private stub that exits with it. The ids printed by one command then mean nothing to the next.
+
+Run state (plans, rollback records, the replay record, and the `KILL` flag) lives in `HIJACKREWIND_HOME`, default `.hijackrewind` in the working directory. `hijackrewind audit` prints each `action_id` for `rewind` and `reconcile`.
+
 ## What a run does
 
 1. Read an `.eml`, a local page, or a document (`hijackrewind run PATH`).

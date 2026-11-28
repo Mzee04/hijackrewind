@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from hijackrewind.config import Settings, load_settings, reveal
 from hijackrewind.pipeline import execute_saved_plan, run_source
-from hijackrewind.runtime import Services, build_services, demo_alert_path, demo_seed, ensure_stub, reset_stub
+from hijackrewind.runtime import Services, build_services, demo_alert_path, demo_seed, ensure_stub, forget_demo_alert, reset_stub
 
 _TASKS: set[asyncio.Task] = set()
 
@@ -50,12 +50,10 @@ def create_dashboard(settings: Settings | None = None, services: Services | None
         token = reveal(current().settings.dashboard_token)
         if not token:
             raise HTTPException(status_code=401, detail="dashboard token is not configured")
-        if request.headers.get("x-hijackrewind-token") != token:
+        if not secrets.compare_digest(request.headers.get("x-hijackrewind-token") or "", token):
             raise HTTPException(status_code=401, detail="dashboard token was rejected")
-        if request.headers.get("x-csrf-token") != app.state.csrf:
+        if not secrets.compare_digest(request.headers.get("x-csrf-token") or "", app.state.csrf):
             raise HTTPException(status_code=403, detail="csrf token was rejected")
-        if current().settings.mode == "live" and not token:
-            raise HTTPException(status_code=403, detail="live dashboard requires a configured token")
 
     def current() -> Services:
         return app.state.services
@@ -118,6 +116,7 @@ def create_dashboard(settings: Settings | None = None, services: Services | None
         services_now.github.base = services_now.settings.api_base()
         services_now.egress.api_host = services_now.settings.api_host()
         reset_stub(services_now.settings.stub_url, demo_seed())
+        forget_demo_alert(services_now.settings)
         return await _spawn(app, services_now, str(demo_alert_path()))
 
     @app.post("/api/plans/{plan_id}/approve")

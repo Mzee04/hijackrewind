@@ -11,6 +11,7 @@ import uvicorn
 from hijackrewind import __version__
 from hijackrewind.config import load_settings
 from hijackrewind.dashboard import create_dashboard
+from hijackrewind.killswitch import ToolCancelled
 from hijackrewind.actions import reconcile, rewind
 from hijackrewind.pipeline import execute_saved_plan, run_source
 from hijackrewind.preflight import live_preflight
@@ -19,6 +20,7 @@ from hijackrewind.runtime import (
     demo_alert_path,
     demo_seed,
     ensure_stub,
+    forget_demo_alert,
     reset_stub,
     stub_state,
 )
@@ -131,6 +133,7 @@ async def _demo(kill_scene: bool) -> int:
     if services.kill.tripped:
         services.kill.reset(audit=services.audit)
     reset_stub(settings.stub_url, demo_seed())
+    forget_demo_alert(settings)
     before = [item["id"] for item in stub_state(settings.stub_url)["ssh_keys"]]
     print(f"stub {settings.stub_url} ssh key ids before: {before}")
     alert = demo_alert_path()
@@ -181,6 +184,9 @@ async def _approve(plan_id: str, *, approved: bool) -> int:
     except FileNotFoundError:
         print(f"no plan {plan_id}", file=sys.stderr)
         return 2
+    except ToolCancelled as exc:
+        print(f"kill switch is tripped ({exc}). Run `hijackrewind kill --reset` first.", file=sys.stderr)
+        return 3
     _print_result(result)
     return 0 if result.status != "failed" else 1
 
@@ -195,6 +201,9 @@ async def _reconcile(action_id: str) -> int:
     except FileNotFoundError:
         print(f"no action {action_id}", file=sys.stderr)
         return 2
+    except ToolCancelled as exc:
+        print(f"kill switch is tripped ({exc}). Run `hijackrewind kill --reset` first.", file=sys.stderr)
+        return 3
     print(f"remote: {record.get('reconciled')}")
     print(f"status: {record.get('status')}")
     return 0
@@ -213,6 +222,9 @@ async def _rewind(action_id: str) -> int:
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2
+    except ToolCancelled as exc:
+        print(f"kill switch is tripped ({exc}). Run `hijackrewind kill --reset` first.", file=sys.stderr)
+        return 3
     print(f"status: {record['status']}")
     print(f"action: {action_id}")
     return 0

@@ -189,3 +189,10 @@ def demo_seed() -> dict:
 
 def demo_alert_path() -> Path:
     return repo_root() / "sandbox" / "fixtures" / "genuine-new-ssh-key.eml"
+
+
+def forget_demo_alert(settings: Settings) -> None:
+    """Let the sandbox demo fixture run again. Replay protection still applies to every other message."""
+    from hijackrewind.dkim_verify import forget_message
+
+    forget_message(Path(settings.home), demo_alert_path().read_bytes())

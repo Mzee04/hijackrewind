@@ -373,6 +373,10 @@ async def _execute_body(
     del document
     refusal = _plan_refusal(plan)
     if refusal:
+        if plan.status == "executing":
+            # Approval was consumed above. Do not leave the plan stuck as executing.
+            plan.status = "blocked"
+            save_plan(services, plan)
         services.audit.append(
             run_id=plan.run_id,
             actor="agent",

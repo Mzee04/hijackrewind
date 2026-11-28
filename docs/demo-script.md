@@ -40,12 +40,12 @@ Rewind posts the saved public key. Key 99 is present again, with a new id if the
 ## 1:10–1:40 Kill switch and reconcile
 
 ```bash
-python3 -m hijackrewind kill --reset
 python3 -m hijackrewind demo --kill
+python3 -m hijackrewind kill --reset
 python3 -m hijackrewind reconcile ACTION_ID
 ```
 
-The kill scene trips the switch while the stub is still holding the delete, so that particular delete is not applied and key 99 remains. The audit note for an interrupted sent mutate is `cancelled, outcome unknown`. Reconcile reads the remote object and records whether it is present or absent. The client abort is not a server-side cancellation.
+The kill scene trips the switch while the stub is still holding the delete, so that particular delete is not applied and key 99 remains. The audit note for an interrupted sent mutate is `cancelled, outcome unknown`. The switch stays tripped after the scene, so reset it before reconcile. Reconcile reads the remote object and records whether it is present or absent. The client abort is not a server-side cancellation.
 
 ## 1:40–2:10 Audit trail and Trap Pack
 
