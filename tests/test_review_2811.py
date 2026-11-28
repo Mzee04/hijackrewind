@@ -72,3 +72,16 @@ def test_dashboard_script_ids_exist():
     used = set(re.findall(r'\$\("([^"]+)"\)', html))
     assert used, "dashboard script uses no element ids"
     assert used <= ids, f"script references missing ids: {sorted(used - ids)}"
+
+
+def test_cli_reconcile_reports_a_tripped_switch_cleanly(services, monkeypatch, capsys):
+    from hijackrewind import cli
+
+    monkeypatch.setattr(cli, "load_settings", lambda: services.settings)
+    _unknown_action(services, "/repos/test-owner/test-repo/keys/50", {"id": 50})
+    services.kill.trip("test")
+    try:
+        assert cli.main(["reconcile", "act-review"]) == 3
+    finally:
+        services.kill.reset()
+    assert "kill --reset" in capsys.readouterr().err
