@@ -130,9 +130,9 @@ def authorize_rewind(record: dict, settings: Settings) -> tuple[bool, str]:
         return False, "mode is dry-run"
     if record.get("status") == "rolled_back":
         return True, "already rolled back"
-    if record.get("status") == "outcome_unknown":
+    if record.get("status") in {"outcome_unknown", "pending"}:
         return False, "outcome unknown; run reconcile before rewind"
-    if record.get("status") not in {"pending", "executed"}:
+    if record.get("status") != "executed":
         return False, "action is not in a rewindable state"
     method = record.get("reverse_method")
     path = record.get("reverse_path") or ""

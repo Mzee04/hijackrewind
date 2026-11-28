@@ -65,6 +65,9 @@ class EgressLog:
             self._block(host or "unknown", parsed.path or "/", "api host is not the configured mutate host")
             raise EgressDenied(host or "unknown", "host is not the configured API")
         path = parsed.path or "/"
+        if any(segment in {".", ".."} for segment in path.split("/")):
+            self._block(host, path, "refusing a dot segment in an API path")
+            raise EgressDenied(host, "dot segments are not allowed in API paths")
         if parsed.query:
             self._block(host, path, "refusing a query string on an API call")
             raise EgressDenied(host, "query string is not allowed on API calls")

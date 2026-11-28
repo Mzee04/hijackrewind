@@ -7,8 +7,9 @@ from hijackrewind.trap_harness import harness_settings, run_pack_sync, write_res
 def test_trap_pack_runs_every_file_without_the_answer_key(stub, tmp_path):
     settings = harness_settings(stub.url, tmp_path / "home")
     services = build_services(settings)
-    rows = run_pack_sync(services)
-    results = write_results(rows, repo_root() / "tests" / "trap-pack" / "RESULTS.md")
+    # Write to tmp so the test run does not rewrite tracked files.
+    rows = run_pack_sync(services, trace_dir=tmp_path / "traces")
+    results = write_results(rows, tmp_path / "RESULTS.md")
     assert len(rows) == 20
     assert results.is_file()
     names = [row["file"] for row in rows]
@@ -20,7 +21,7 @@ def test_trap_pack_runs_every_file_without_the_answer_key(stub, tmp_path):
     assert all(row["status"] != "failed" for row in rows)
     assert all(not row["mutated"] for row in rows)
     for row in rows:
-        trace = repo_root() / "tests" / "trap-pack" / row["trace"]
+        trace = tmp_path / row["trace"]
         assert trace.is_file()
         for line in trace.read_text(encoding="utf-8").splitlines():
             event = json.loads(line)
